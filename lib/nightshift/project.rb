@@ -15,14 +15,15 @@ module Nightshift
   #   <state>/runs/<tag>/        prompt, transcript, diff, gate output per attempt
   #   <state>/REPORT.md          morning report
   #   <state>/STOP               create this file to stop after the current attempt
-  #   <state>/repo/              dedicated clone the worker edits (no remotes)
+  #   <state>/repo/              dedicated clone the worker edits (no remotes); with
+  #                              project.in_place, project.repo is your own repo instead
   class Project
     CONFIG_FILE = "nightshift.yml"
 
     # Every setting nightshift knows, with its default. nightshift.yml overrides any of them.
     DEFAULTS = {
       "project" => {
-        "name" => "", "source" => "", "repo" => "repo", "branch" => "", "bootstrap" => [],
+        "name" => "", "source" => "", "repo" => "repo", "in_place" => false, "branch" => "", "bootstrap" => [],
         "acceptance_dir" => "tests/acceptance/", "holdout_dir" => "tests/holdout/"
       },
       "roles" => { "worker" => "pi-local", "escalate" => "", "planner" => "claude-code" },
@@ -86,6 +87,12 @@ module Nightshift
 
       format("%<h>02d:%<m>02d", h: value / 3600, m: (value % 3600) / 60)
     end
+
+    # The worker edits your own repo (on its own branch) instead of a clone. See TRADEOFFS.md.
+    def in_place? = cfg["project"]["in_place"] == true
+
+    # The branch nightshift works on ("" = not recorded, as in configs written before in_place).
+    def branch = cfg["project"]["branch"].to_s
 
     def config_file = File.join(dir, CONFIG_FILE)
     def tasks_file = File.join(dir, "tasks.json")

@@ -24,7 +24,7 @@ module Nightshift
       tasks = @project.load_tasks
       [[File.directory?(@project.repo), "repo #{@project.repo}"],
        [!%w[main master].include?(@git.branch), "branch #{@git.branch}"],
-       [@git.remotes.empty?, "no git remotes in the clone"],
+       *isolation_checks,
        [File.file?(@project.lock_file), "contract approved (contract.lock)"],
        [Plan.problems(tasks).empty?, "tasks.json valid (#{tasks.size} tasks)"],
        [Exec.available?(@project.shell.first), "gate shell #{@project.shell.first}"],
@@ -34,6 +34,18 @@ module Nightshift
     end
 
     private
+
+    # A clone must have no remotes. In place the repo keeps its remotes (that is the trade-off
+    # you chose; see TRADEOFFS.md), but it must be on nightshift's branch and clean.
+    def isolation_checks
+      return [[@git.remotes.empty?, "no git remotes in the clone"]] unless @project.in_place?
+
+      remotes = @git.remotes
+      [[true, "in place: the worker edits #{@project.repo} " \
+              "(remotes: #{remotes.empty? ? 'none' : remotes.join(', ')}; see TRADEOFFS.md)"],
+       [@project.branch.empty? || @git.branch == @project.branch, "on the nightshift branch #{@project.branch}"],
+       [!@git.dirty?, "no uncommitted or untracked files (a failed attempt runs git clean)"]]
+    end
 
     def adapter_checks
       @project.cfg["roles"].reject { |_, name| name.to_s.empty? }.map do |role, name|

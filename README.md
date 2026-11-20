@@ -29,7 +29,9 @@ The diagram below shows the overnight case.
 It is written in Ruby 4.0. Running it needs one gem, [Thor](https://github.com/rails/thor), for
 the command line; developing it uses a few more (see [Dependencies](#dependencies)).
 It was built for Windows first and also runs on Linux and macOS. How the code is organised and
-the style it follows are described in [CONVENTIONS.md](CONVENTIONS.md).
+the style it follows are described in [CONVENTIONS.md](CONVENTIONS.md). The choices that cost
+something, such as why the worker gets its own clone of your repo and when to let it work in
+your repo instead (`--in-place`), are explained in [TRADEOFFS.md](TRADEOFFS.md).
 
 ---
 
@@ -119,6 +121,8 @@ That list is known debt, so shrink it rather than add to it (see
 ```powershell
 # The project must be committed: nightshift works on a clone of committed state.
 ns init C:\nightshift\myproj --source C:\path\to\repo
+#   huge repo? add --in-place to work on a new branch in the repo itself, with no clone
+#   (read TRADEOFFS.md first: you must leave that folder alone while a run is going)
 notepad C:\nightshift\myproj\nightshift.yml         # checks, protected paths, roles
 notepad C:\nightshift\myproj\requirements.md
 
@@ -153,8 +157,8 @@ Other commands:
 - No command ever prompts, so every command works from scripts and the Task Scheduler.
 
 To use a different planner, run `ns plan <state> --print-prompt`. It prints the planner prompt,
-which you can give to any chat or agent working in the clone. Afterwards, collect the result
-with `ns plan <state> --harvest`.
+which you can give to any chat or agent working in the clone (or in your repo, in place).
+Afterwards, collect the result with `ns plan <state> --harvest`.
 
 ### Starting a project from scratch
 
@@ -258,7 +262,7 @@ Agents edit tests, delete them, skip them, or special-case the expected outputs.
 | Deleting tests, adding `skip`, `.only`, `xit` or `xfail` | The integrity gate |
 | Hard-coding expected values | Hidden holdout tests with different inputs. They are kept outside the repo and copied in only during verification, and their content never reaches the prompt. An advisory literal scan also runs. |
 | "Done, all tests pass" when they don't | Claims are ignored, because the harness runs the checks itself |
-| Committing, pushing, resetting | The worker's commits are folded back into the harness's diff. The clone has no remotes, and the guard blocks git. |
+| Committing, pushing, resetting | The worker's commits are folded back into the harness's diff. The clone has no remotes, and the guard blocks git. In place your remotes stay (see [TRADEOFFS.md](TRADEOFFS.md)). |
 | Hanging or looping | A hard timeout kills the whole process tree (exit 124). The guard also enforces turn and time budgets and identical-call limits. |
 
 ### Other orchestrators
@@ -282,7 +286,7 @@ Write-ups on verification layers ([Opslane](https://dev.to/0xgosu/agents-that-ru
    - a STOP file appears.
 8. **Durable.** State is written atomically, the journal is append-only, and the harness recovers from crashes. The model server is health-checked before each attempt and restarted through `server.start_cmd`.
 9. **Agnostic by data.** Agents are YAML entries in `adapters/adapters.yml`, and roles map to adapters per project. Prompts are templates that a project can override. Gates are shell commands in any language.
-10. **Nothing reaches your real repo automatically.** The worker edits `<state>/repo`, a clone with its remotes removed, on its own branch. `ns land` prints the merge commands, and you run them yourself.
+10. **Nothing reaches your real repo automatically.** The worker edits `<state>/repo`, a clone with its remotes removed, on its own branch. `ns land` prints the merge commands, and you run them yourself. With `ns init --in-place` the worker edits your repo on its own branch instead, and nightshift refuses to start, or stops, rather than discard anything it did not make. [TRADEOFFS.md](TRADEOFFS.md) explains why the clone is the default.
 
 ## 5. Configuration (`nightshift.yml`)
 
@@ -292,7 +296,7 @@ file is the full list of settings.
 
 | Section | Key settings |
 |---|---|
-| `project` | `source`, `branch`, `bootstrap` (run by `ns check`), `acceptance_dir`, `holdout_dir` |
+| `project` | `source`, `repo` (where the worker edits: `repo`, the clone, by default), `in_place` (set by `ns init --in-place`), `branch`, `bootstrap` (run by `ns check`), `acceptance_dir`, `holdout_dir` |
 | `roles` | `worker`, `escalate`, `planner` (each is an adapter name; `""` turns that role off) |
 | `budgets` | `until` (`"HH:MM"`) or `hours` (both empty/0 by default = no time limit), `max_iterations`, `attempt_timeout_min`, `max_attempts`, `max_consecutive_failures`, `max_escalations` |
 | `gates` | `setup`, `global` (commands), `protect` (folders ending in `/`, or globs), `test_paths`, `allow_new_dirs`, `shell` |
@@ -331,7 +335,7 @@ Placeholders:
 
 | Placeholder | Value |
 |---|---|
-| `{repo}`, `{run_dir}`, `{state}`, `{home}` | Paths: the clone, the attempt's run folder, the state dir, the nightshift folder |
+| `{repo}`, `{run_dir}`, `{state}`, `{home}` | Paths: the repo the worker edits (the clone, or yours in place), the attempt's run folder, the state dir, the nightshift folder |
 | `{prompt_file}`, `{prompt}`, `{message}` | The prompt file path, its text, and a one-line instruction |
 | `{ruby}` | The Ruby that runs nightshift |
 | `{container}` | A unique name for Docker |
@@ -385,7 +389,7 @@ Start pi in the project folder, not its parent.
 
 ### Isolation levels
 
-- **Native (`pi-local`):** the guard, a dedicated clone, and the gates.
+- **Native (`pi-local`):** the guard, a dedicated clone (or your repo with `--in-place`), and the gates.
 - **Docker (`pi-local-docker`):** no internet. The container is on an `--internal` network whose only way out is a socat forwarder to llama-server. Only the repo is mounted. Never mount `~/.ssh`, the Docker socket, or your real `~/.pi/agent`, which holds API keys. The adapter expects the `pi-sandbox:1.5.2` image, the `pi-net` network and the forwarder to exist already; setting them up is not part of this repo.
 
 ## 7. Task format (`tasks.json`)
@@ -410,7 +414,7 @@ Start pi in the project folder, not its parent.
 <state>/tasks.json        the plan             <state>/runs/<tag>/     prompt, transcript, diff, gate logs, guard log
 <state>/holdout/          hidden tests         <state>/REPORT.md       morning report
 <state>/contract.lock     protected hashes     <state>/STOP            create to stop
-<state>/state.json        progress (harness)   <state>/repo/           the clone the worker edits
+<state>/state.json        progress (harness)   <state>/repo/           the clone the worker edits (none in place)
 <state>/prompts/          optional prompt overrides (same file names as templates/prompts/)
 ```
 
@@ -432,7 +436,7 @@ the journal.
 ## 10. What has been tested
 
 **Tested (Ruby 4.0.9):**
-- `rake test` runs 38 tests and they all pass, and `rake lint` reports no offenses.
+- `rake test` runs 46 tests and they all pass, and `rake lint` reports no offenses.
   - The gate unit tests cover path matching, integrity, stray paths, the hard-code scan, plan validation, fingerprints, deadlines, YAML times and placeholders.
   - A full simulated night with the fake agent covers these scenarios:
     1. an honest pass;
@@ -447,6 +451,7 @@ the journal.
     10. a wrong path is rejected and the retry passes with the corrected path in its prompt;
     11. crash recovery and the STOP file work.
   - A project from scratch: `init --new` creates the repo, the planner prompt asks for a skeleton, `ns check` rejects a check whose tool is missing, and then a run builds three dependent features on an empty repo (one commit per task).
+  - In place (`init --in-place`), on a repo with a remote and an ignored `.env`: the branch is created in the repo itself, a night commits there and leaves `main` alone, the `.env` survives the reset after a failed attempt, `ns run` refuses to start when the repo has a file it did not make (and the file is kept) or is on another branch, `ns init` refuses a dirty repo or a state dir inside the repo, `doctor` passes with the remote present, and `land` prints no fetch.
   - The command line: `--version` and `help`, unknown options and missing arguments fail with exit 1, errors are one line on stderr, bad `--until`/`--hours` values are rejected before any work, `init` refuses an existing state dir, `land` prints the right commands, and `stop` writes the STOP file.
 - `rake guard` runs 13 checks of the pi guard's path repair, and they all pass.
 - `init`, `plan --print-prompt`, `check --no-run`, `doctor`, `status` and `land` were run by hand.
@@ -454,7 +459,8 @@ the journal.
 **Not tested yet:**
 - a real night with the local model (start with `ns run <state> --max-iterations 1` and llama-server up);
 - escalation to a real cloud adapter;
-- the Docker adapter, `codex` and `opencode-local`.
+- the Docker adapter, `codex` and `opencode-local`;
+- the in-place stop between attempts when the repo changes mid-run (it uses the same check as `ns run`'s refusal, which is tested).
 
 ## 11. Layout
 
@@ -483,6 +489,7 @@ nightshift/
   Rakefile                         rake test, rake lint, rake guard
   Gemfile, Gemfile.lock            thor (runtime); minitest, rake, rubocop (development)
   .rubocop.yml, .rubocop_todo.yml  lint rules; known size debt
+  TRADEOFFS.md                     design trade-offs: clone vs. in place, and why the clone is the default
   AGENTS.md, CLAUDE.md             rules for coding agents that change nightshift (CLAUDE.md imports AGENTS.md)
   .claude/                         Claude Code hook: reminds the agent to update the docs with the code
 ```

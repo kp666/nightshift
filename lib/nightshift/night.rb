@@ -133,15 +133,7 @@ module Nightshift
       raise Error, "No contract.lock. Review the plan and run `ns approve` first." unless lock
 
       state["head"] = lock["commit"] if state["head"].to_s.empty?
-      head = state["head"]
-      branch = git.branch
-      raise Error, "Refusing to run on '#{branch}'." if %w[main master].include?(branch)
-
-      log("warn", msg: "repo has remotes; nightshift never pushes, but removing them is safer") if git.remotes.any?
-      if git.head != head || git.dirty?
-        log("recover", msg: "repo not at last good commit #{head[0, 8]}; resetting (interrupted attempt?)")
-        git.reset_to(head)
-      end
+      recover_repo(state["head"])
       lock["files"].each do |rel, hash|
         path = File.join(project.repo, rel)
         next if File.file?(path) && Util.sha256(path) == hash
@@ -152,6 +144,42 @@ module Nightshift
 
       log("recover", msg: "attempt #{state['inflight']} was interrupted (crash/reboot); discarded")
       state["inflight"] = ""
+    end
+
+    # Bring the repo back to the last good commit, e.g. after a crash mid-attempt.
+    def recover_repo(head)
+      branch = git.branch
+      raise Error, "Refusing to run on '#{branch}'." if %w[main master].include?(branch)
+
+      if project.in_place?
+        check_in_place(head)
+      elsif git.remotes.any?
+        log("warn", msg: "repo has remotes; nightshift never pushes, but removing them is safer")
+      end
+      return unless git.head != head || git.dirty?
+
+      log("recover", msg: "repo not at last good commit #{head[0, 8]}; resetting (interrupted attempt?)")
+      git.reset_to(head)
+    end
+
+    # In place the repo is yours, so nightshift refuses to start rather than reset away work it
+    # did not make. The one exception is the leftovers of its own interrupted attempt.
+    def check_in_place(head)
+      change = outside_change(head)
+      return if change.nil? || (!change.start_with?("on branch") && !state["inflight"].to_s.empty?)
+
+      raise Error, "In-place repo #{project.repo}: #{change}. nightshift never discards work it did not make: " \
+                   "commit it on another branch (or stash it), check out #{project.branch}, then run again."
+    end
+
+    # nil, or how the in-place repo differs from where nightshift left it.
+    def outside_change(head)
+      branch = git.branch
+      return "on branch #{branch}, not #{project.branch}" if !project.branch.empty? && branch != project.branch
+      return "new commits after the last good commit #{head[0, 8]}" if git.head != head
+      return "uncommitted or untracked files" if git.dirty?
+
+      nil
     end
 
     def start_or_resume
@@ -182,6 +210,9 @@ module Nightshift
         if night["consec_fail"] >= Integer(@budgets["max_consecutive_failures"])
           return "circuit breaker: #{night['consec_fail']} failed attempts in a row"
         end
+
+        change = project.in_place? && outside_change(state["head"])
+        return "in-place repo changed outside nightshift (#{change}); stopped so nothing of yours is lost" if change
 
         task = eligible
         return "no eligible task left" if task.nil?
@@ -241,6 +272,7 @@ module Nightshift
                                      extra_vars: { "state" => project.dir, "protect_csv" => protect.join(","),
                                                    "guard_minutes" => [timeout_min - 8, 5].max.to_i.to_s,
                                                    "max_turns" => task.fetch("maxTurns", 50).to_s })
+      ensure_branch
       changed = git.stage_all_from(head)
       patch = git.staged_patch(File.join(run_dir, "diff.patch"))
       verdict = Verifier.new(self).verify(task, git.staged_status, patch, run_dir)
@@ -270,6 +302,15 @@ module Nightshift
                                     number: number, max_attempts: max_attempts, path_lines: path_lines)
       end
       state["inflight"] = ""
+    end
+
+    # In place, someone may switch branches while the agent runs. Staging and committing would then
+    # move that other branch, so stop instead; the next run's preflight explains what to do.
+    def ensure_branch
+      return unless project.in_place? && !project.branch.empty?
+
+      branch = git.branch
+      raise Error, "In-place repo switched to #{branch} during an attempt; stopping" if branch != project.branch
     end
 
     # The last attempt of a task may go to a stronger (paid) adapter.

@@ -4,7 +4,9 @@
 
 project:
   name: "{{NAME}}"
-  source: "{{SOURCE}}"       # your real repo; nightshift works in ./repo (a clone without remotes)
+  source: "{{SOURCE}}"       # your real repo
+  repo: "{{REPO}}"           # where the worker edits: ./repo, a clone without remotes (the default)
+  in_place: {{IN_PLACE}}     # true: the worker edits your real repo on its own branch (see TRADEOFFS.md)
   branch: "{{BRANCH}}"
   bootstrap: []              # run by `ns check`, e.g. ["npm ci"] (gitignored output survives resets)
   acceptance_dir: tests/acceptance/

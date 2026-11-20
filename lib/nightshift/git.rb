@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
 module Nightshift
-  # Git operations on the nightshift clone. The harness owns git; workers never commit
-  # (and if they do, their commits are folded back into the index and judged like any edit).
+  # Git operations on the repo the worker edits (the clone, or your own repo in place). The
+  # harness owns git; workers never commit (and if they do, their commits are folded back into
+  # the index and judged like any edit).
   class Git
     class Failed < Error; end
 

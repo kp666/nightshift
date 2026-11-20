@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Nightshift
-  # `ns approve`: freezes the contract. Commits the tasks and acceptance tests in the clone,
+  # `ns approve`: freezes the contract. Commits the tasks and acceptance tests in the repo,
   # records the hashes of every protected file in contract.lock (the gates reject any attempt
   # that changes one), and by default gives blocked tasks a fresh start.
   module Approval
@@ -24,7 +24,10 @@ module Nightshift
       raise Error, "Fix tasks.json first:\n  #{problems.join("\n  ")}" if problems.any?
 
       branch = git.branch
-      raise Error, "The clone is on #{branch}; nightshift needs its own branch." if %w[main master].include?(branch)
+      raise Error, "The repo is on #{branch}; nightshift needs its own branch." if %w[main master].include?(branch)
+      if project.in_place? && !project.branch.empty? && branch != project.branch
+        raise Error, "The repo is on #{branch}; check out #{project.branch} first (in place)."
+      end
       return unless File.exist?(File.join(project.repo, Planner::PLAN_DIR))
 
       raise Error, "#{Planner::PLAN_DIR}/ is still in the repo; run `ns plan --harvest` first."

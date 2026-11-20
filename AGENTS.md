@@ -12,7 +12,9 @@ This file is for agents that change nightshift itself (Claude Code, pi, Codex, o
 - `CONVENTIONS.md`: the class and service lists, the command table, how-to-extend and the
   Windows notes;
 - `templates/prompts/*.md` and `templates/project.yml`, when what the agent or the user is told
-  changes.
+  changes;
+- `TRADEOFFS.md`, when a change alters what a trade-off costs or protects (for example what
+  in-place mode refuses).
 
 When you rename or remove something, grep the `.md` files for the old name. When you finish a
 change, say which `.md` files you updated, or why none needed changes. Before a commit, check

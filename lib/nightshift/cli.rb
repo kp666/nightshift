@@ -38,20 +38,24 @@ module Nightshift
     desc "version", "print the nightshift and Ruby versions"
     def version = UI.info("nightshift #{VERSION} (ruby #{RUBY_VERSION})")
 
-    desc "init STATE_DIR", "create a state dir with a dedicated clone of your repo"
+    desc "init STATE_DIR", "create a state dir with a dedicated clone of your repo (or --in-place)"
     long_desc <<~TEXT
       Clones REPO into STATE_DIR/repo on a new branch and removes every remote, so the worker can
       never push. Writes nightshift.yml and a requirements.md template next to it.
       With --new, REPO may be a new or empty folder: it becomes a git repo first.
+      With --in-place there is no clone: the branch is created and checked out in REPO itself, and
+      the worker edits REPO. REPO must have no uncommitted or untracked files, and STATE_DIR must be
+      outside it. TRADEOFFS.md explains what that gives up.
     TEXT
     method_option :source, required: true, banner: "REPO", desc: "your real git repo"
     method_option :new, type: :boolean, desc: "start a project from scratch: make REPO a new git repo first"
+    method_option :in_place, type: :boolean, desc: "no clone: work on a new branch in REPO itself (big repos)"
     method_option :name, desc: "project name (default: the REPO folder name)"
-    method_option :branch, desc: "branch in the clone (default: nightshift/<date>)"
+    method_option :branch, desc: "the branch nightshift works on (default: nightshift/<date>)"
     method_option :ref, desc: "start from this commit or branch of REPO"
     def init(state)
-      Setup.init(state, source: options[:source], new_repo: options[:new], name: options[:name],
-                        branch: options[:branch], ref: options[:ref])
+      Setup.init(state, source: options[:source], new_repo: options[:new], in_place: options[:in_place],
+                        name: options[:name], branch: options[:branch], ref: options[:ref])
     end
 
     desc "plan STATE_DIR", "turn requirements.md into tasks and acceptance tests, with a planner agent"

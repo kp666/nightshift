@@ -127,6 +127,10 @@ is code that someone who knows Ruby but not this project can read, change and tr
   `Gates.integrity` on the staged diff, and by `contract.lock` hashes in `Night#preflight`.
 - The worker's clone has no remotes, and nightshift never pushes or merges. `ns land` only
   prints commands.
+- In place (`project.in_place`), the repo is the user's: never reset, clean or commit unless
+  it is on `project.branch` with nothing nightshift did not make (`Night#outside_change`). The
+  only exception is the leftovers of nightshift's own interrupted attempt. TRADEOFFS.md says
+  why the clone stays the default.
 - Never mount `~/.ssh`, the Docker socket or the real `~/.pi/agent` into containers.
 
 ## 7. Style
@@ -169,6 +173,8 @@ is code that someone who knows Ruby but not this project can read, change and tr
   and each test asserts one outcome, so the tests do not depend on their order.
 - `test/scratch_test.rb` covers the from-scratch path end to end (`init --new`, the planner prompt
   for an empty repo, the missing-tool check, and a run).
+- `test/in_place_test.rb` covers `init --in-place` end to end: a night in the user's repo, and
+  every refusal that protects the user's files.
 - `test/cli_test.rb` covers the command line: dispatch, option checks, exit codes, and the
   commands `land` prints. Assert on exit codes, files and the commands a
   plan contains, not on the exact wording or layout of the output.

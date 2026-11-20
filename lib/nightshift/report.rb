@@ -37,8 +37,10 @@ module Nightshift
     end
 
     # `ns land`: the git commands that bring the night's branch into the real repo. Nothing is
-    # run: the human reviews and merges.
+    # run: the human reviews and merges. In place the branch is already in the repo: no fetch.
     def land
+      return land_in_place if @project.in_place?
+
       source = @project.cfg["project"]["source"]
       branch = @git.branch
       base = @base.empty? ? "main" : @base[0, 10]
@@ -53,6 +55,19 @@ module Nightshift
     end
 
     private
+
+    def land_in_place
+      repo = Util.norm(@project.repo)
+      branch = @git.branch
+      base = @base.empty? ? "main" : @base[0, 10]
+      <<~TEXT
+        # nightshift worked in place: #{branch} is already a branch of your repo (nothing is merged automatically).
+        git -C "#{repo}" log --stat #{base}..#{branch}
+        git -C "#{repo}" diff #{base}..#{branch}
+        # when satisfied (from your normal branch):
+        git -C "#{repo}" merge --no-ff #{branch}      # or cherry-pick individual task commits
+      TEXT
+    end
 
     def recent(count)
       journal = Util.read(@project.journal_file).lines.last(count)
