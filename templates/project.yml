@@ -1,0 +1,49 @@
+# nightshift project config. Anything not set here falls back to the defaults
+# (Project::DEFAULTS in lib/nightshift/project.rb) and the adapter catalog (adapters/adapters.yml).
+# Quote times ("07:00"): unquoted, YAML reads 07:00 as a number.
+
+project:
+  name: "{{NAME}}"
+  source: "{{SOURCE}}"       # your real repo; nightshift works in ./repo (a clone without remotes)
+  branch: "{{BRANCH}}"
+  bootstrap: []              # run by `ns check`, e.g. ["npm ci"] (gitignored output survives resets)
+  acceptance_dir: tests/acceptance/
+  holdout_dir: tests/holdout/
+
+roles:
+  worker: pi-local           # does the work on every attempt
+  escalate: ""               # e.g. claude-code: used for the LAST attempt of a task (costs money)
+  planner: claude-code       # attended planning (`ns plan`)
+
+budgets:
+  # No time limit by default: a run ends when every task is done or blocked, or a safety stop
+  # trips (max_iterations, the circuit breaker, `ns stop`). Limit it per run with
+  # `ns run --until 07:00` / `--hours 3`, or set a standing limit here (quote times):
+  until: ""                  # e.g. "07:00"
+  hours: 0                   # e.g. 3; 0 = no limit
+  max_iterations: 60
+  attempt_timeout_min: 75
+  max_attempts: 3            # per task
+  max_consecutive_failures: 5   # circuit breaker
+  max_escalations: 4
+
+gates:
+  # Commands run in the repo through Git Bash on Windows by default (set shell: [...] to change).
+  setup: []                  # before checks on every attempt, e.g. ["npm run build"]
+  global: []                 # after task checks on every attempt, e.g. ["npx tsc --noEmit"]
+  protect: [tests/acceptance/, AGENTS.md, .nightshift/]
+  test_paths: [tests/]
+  allow_new_dirs: []         # new top-level folders the worker may create, e.g. [bench/]
+
+server:
+  health_url: http://127.0.0.1:8080/health
+  # start_cmd: [pwsh, -NoProfile, -File, C:/path/to/start-server.ps1]
+  down_grace_min: 10
+
+notify:
+  cmd: []                    # e.g. [curl, -s, -d, "{body}", "https://ntfy.sh/<your-private-topic>"]
+
+# Override any adapter field for this project, e.g.:
+# adapters:
+#   pi-local:
+#     timeout_min: 60

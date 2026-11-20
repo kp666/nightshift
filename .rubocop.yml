@@ -1,0 +1,59 @@
+# Known debt: methods over the size limits, listed per file. Shrink that file, delete it as it empties.
+inherit_from: .rubocop_todo.yml
+inherit_mode:
+  merge: [Exclude]
+
+# RuboCop config for nightshift. Run: bundle exec rake lint   (autocorrect: bundle exec rake lint:fix)
+plugins:
+  - rubocop-minitest
+  - rubocop-rake
+
+AllCops:
+  TargetRubyVersion: 4.0
+  NewCops: enable
+  SuggestExtensions: false
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+Layout/LineLength:
+  Max: 120
+
+# The code is LF everywhere, on Windows too (prompts, tests and gate scripts depend on it).
+Layout/EndOfLine:
+  EnforcedStyle: lf
+
+# Size limits. Stricter than "anything goes" and looser than the defaults (10-line methods), which
+# would chop the night loop into fragments that are harder to follow than the original. Methods
+# over these limits get refactored, not exempted.
+Metrics/MethodLength:
+  Max: 20
+  Exclude: [test/**/*]
+Metrics/AbcSize:
+  Max: 25
+  Exclude: [test/**/*]
+Metrics/CyclomaticComplexity:
+  Max: 10
+Metrics/PerceivedComplexity:
+  Max: 10
+Metrics/ClassLength:
+  Max: 300
+  Exclude: [test/**/*]
+Metrics/ModuleLength:
+  Max: 200
+Metrics/ParameterLists:
+  CountKeywordArgs: false
+
+# End-to-end tests check one scenario each, which can take a few assertions.
+Minitest/MultipleAssertions:
+  Max: 6
+
+# Short names that are conventional here: `ts` is a task's state hash,
+# `kw` the keyword hash passed through to gates, `ok` a boolean result, `on` a switch.
+Naming/MethodParameterName:
+  AllowedNames: [ts, kw, ok, "on", id, io] # "on" quoted: bare on is YAML for true
+
+# Methods such as `ensure_up` do work and return whether it succeeded; a `?`
+# name would wrongly suggest a side-effect-free question.
+Naming/PredicateMethod:
+  Enabled: false

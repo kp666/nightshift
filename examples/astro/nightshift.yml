@@ -1,0 +1,58 @@
+# nightshift config for kerala-astro version 3 (Vite + React + TS, vitest, jsdom).
+# Use: ns init C:/path/to/nightshift-state/astro --source C:/path/to/kerala-astro-v3
+#      then copy this file over the generated nightshift.yml (keep the generated branch name),
+#      and replace every C:/path/to/... below with your real paths.
+#
+# BEFORE `ns init`: v3 has uncommitted edits and an untracked spec/ folder. nightshift clones
+# COMMITTED state only, so commit that work first (on a branch of your choice).
+
+project:
+  name: astro
+  source: C:/path/to/kerala-astro-v3
+  branch: nightshift/astro
+  bootstrap: ["npm ci --no-audit --no-fund"]   # attended, with network; node_modules is gitignored so it survives resets
+  # vitest.config.ts only includes ./spec/test/**, so the contract tests must live there:
+  acceptance_dir: spec/test/acceptance/
+  holdout_dir: spec/test/holdout/
+
+roles:
+  worker: pi-local           # Qwen3.8-27B-pi-adapted via llama-server
+  escalate: ""               # claude-code to spend cloud tokens on the last attempt of a task
+  planner: claude-code       # writes tasks + golden tests with you, using PyJHora as the oracle
+
+budgets:
+  until: ""                  # no time limit; use `ns run --until 07:00` for an overnight run
+  hours: 0
+  max_iterations: 40
+  attempt_timeout_min: 60
+  max_attempts: 3
+  max_consecutive_failures: 5
+
+gates:
+  setup: []
+  # Start empty: `ns check` tells you if these are green at baseline. A gate that is already red
+  # makes every attempt fail. Add them once they pass:
+  #   - npx tsc --noEmit -p tsconfig.app.json
+  #   - npx vitest run spec/test/acceptance      (all contract tests together)
+  global: []
+  protect: [spec/test/acceptance/, spec/test/holdout/, spec/test/setup.ts,
+            spec/test/fixtures/, vitest.config.ts, vite.config.ts, "tsconfig*.json",
+            package.json, package-lock.json, bun.lockb, AGENTS.md, .nightshift/]
+  test_paths: [spec/]
+  verify_timeout_min: 10
+
+server:
+  health_url: http://127.0.0.1:8080/health
+  start_cmd: [pwsh, -NoProfile, -File,
+              C:/path/to/start-server.ps1]
+  down_grace_min: 10
+
+notify:
+  cmd: []   # e.g. [curl, -s, -d, "{body}", "https://ntfy.sh/<your-private-topic>"]
+
+adapters:
+  pi-local:
+    timeout_min: 60
+  # The planner needs to read PyJHora (outside the repo) to generate golden fixtures.
+  claude-code:
+    interactive_cmd: [claude, --add-dir, C:/path/to/PyJHora, "{message}"]

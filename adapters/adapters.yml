@@ -1,0 +1,109 @@
+# nightshift adapter catalog. An adapter is DATA: how to launch an agent headlessly.
+# Add a new agent / LoRA / provider by copying an entry; override any field per project in
+# nightshift.yml under adapters.<name>. The harness never trusts what an adapter says; its
+# gates decide.
+#
+# Placeholders: {repo} {run_dir} {prompt_file} {prompt} {message} {home} {ruby} {state}
+#               {container} {protect_csv} {guard_minutes} {max_turns}
+#
+# Verified (2026-11): pi 1.5.2, claude 2.1.x and opencode 1.18 flags (from --help).
+# Not verified end to end: real runs with the local model, codex.
+
+# Shared environment for pi runs that load the unattended guard extension.
+x-pi-guard-env: &pi_guard_env
+  PI_GUARD: "1"
+  PI_GUARD_ROOT: "{repo}"
+  PI_GUARD_LOG: "{run_dir}/guard.jsonl"
+  PI_GUARD_PROTECT: "{protect_csv}"
+  PI_GUARD_MAX_MINUTES: "{guard_minutes}"
+  PI_GUARD_MAX_TURNS: "{max_turns}"
+
+adapters:
+  # ------------------------------------------------------------ local Qwen via pi (default worker)
+  pi-local:
+    cmd: [pi, -p, --no-session, --offline,
+          --model, llama-cpp/qwen3.8-pi, --thinking, "off",
+          --tools, "read,bash,edit,write",
+          --no-extensions, -e, "{home}/adapters/pi/unattended-guard.ts",
+          --no-skills, --no-prompt-templates, --no-mcp, --no-approve,
+          "@{prompt_file}", "{message}"]
+    prompt_via: file
+    interactive_cmd: [pi, --model, llama-cpp/qwen3.8-pi, "@{prompt_file}"]
+    requires_server: true
+    network: local
+    timeout_min: 75
+    env:
+      <<: *pi_guard_env
+      PI_OFFLINE: "1"
+
+  # ------------------------------------------------------------ same, inside Docker (no internet; see README)
+  # One-time: build the pi-sandbox image, create the internal network `pi-net` and the `llm-gw`
+  # socat forwarder, and create <state>/pi-agent/models.json with baseUrl http://llm-gw:8080/v1.
+  # Never mount ~/.ssh, the Docker socket or your real ~/.pi/agent (it holds API keys).
+  pi-local-docker:
+    cmd: [docker, run, --rm, --name, "{container}", --network, pi-net,
+          --memory, 6g, --cpus, "6", --pids-limit, "512",
+          -v, "{repo}:/work", -v, "{run_dir}:/nsrun",
+          -v, "{state}/pi-agent:/home/node/.pi/agent",
+          -v, "{home}/adapters/pi:/guard:ro",
+          -e, PI_OFFLINE=1, -e, PI_GUARD=1, -e, PI_GUARD_ROOT=/work,
+          -e, PI_GUARD_LOG=/nsrun/guard.jsonl, -e, "PI_GUARD_PROTECT={protect_csv}",
+          -e, "PI_GUARD_MAX_MINUTES={guard_minutes}", -e, "PI_GUARD_MAX_TURNS={max_turns}",
+          -w, /work, "pi-sandbox:1.5.2",
+          pi, -p, --no-session, --offline, --model, llama-cpp/qwen3.8-pi, --thinking, "off",
+          --tools, "read,bash,edit,write", --no-extensions, -e, /guard/unattended-guard.ts,
+          --no-skills, --no-prompt-templates, --no-mcp, --no-approve,
+          "@/nsrun/prompt.md", "{message}"]
+    prompt_via: file
+    kill_cmd: [docker, kill, "{container}"]
+    requires_server: true
+    network: local
+    timeout_min: 75
+
+  # ------------------------------------------------------------ pi with a cloud model (escalation / planner)
+  pi-openrouter:
+    cmd: [pi, -p, --no-session, --model, openrouter/moonshotai/kimi-k2.6,
+          --tools, "read,bash,edit,write",
+          --no-extensions, -e, "{home}/adapters/pi/unattended-guard.ts",
+          --no-skills, --no-prompt-templates, --no-mcp, --no-approve,
+          "@{prompt_file}", "{message}"]
+    prompt_via: file
+    interactive_cmd: [pi, --model, openrouter/moonshotai/kimi-k2.6, "@{prompt_file}"]
+    network: internet
+    timeout_min: 45
+    env: *pi_guard_env
+
+  # ------------------------------------------------------------ Claude Code (planner, escalation)
+  claude-code:
+    cmd: [claude, -p, --output-format, text, --permission-mode, acceptEdits,
+          --allowedTools, "Read,Edit,Write,Glob,Grep,Bash",
+          --disallowedTools, "WebFetch,WebSearch,Bash(git push:*),Bash(git commit:*),Bash(git reset:*)"]
+    prompt_via: stdin
+    interactive_cmd: [claude, "{message}"]
+    network: internet
+    timeout_min: 45
+
+  # ------------------------------------------------------------ opencode (any provider it supports)
+  opencode-local:
+    cmd: [opencode, run, -m, llama-cpp/qwen3.8-pi, -f, "{prompt_file}", "{message}"]
+    prompt_via: file
+    interactive_cmd: [opencode]
+    requires_server: true
+    network: local
+    timeout_min: 75
+
+  # ------------------------------------------------------------ codex (UNVERIFIED: not installed here)
+  codex:
+    cmd: [codex, exec, --sandbox, workspace-write, "-"]
+    prompt_via: stdin
+    interactive_cmd: [codex, "{message}"]
+    network: internet
+    timeout_min: 45
+
+  # ------------------------------------------------------------ deterministic fake (self-tests, dry runs)
+  # Behaviour is chosen per task by "FAKE: <op>" lines in the task notes (see adapters/fake_agent.rb).
+  fake:
+    cmd: ["{ruby}", "{home}/adapters/fake_agent.rb", "{prompt_file}"]
+    prompt_via: file
+    network: none
+    timeout_min: 2
