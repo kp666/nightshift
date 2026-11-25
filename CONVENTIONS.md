@@ -134,9 +134,9 @@ is code that someone who knows Ruby but not this project can read, change and tr
 ## 6. Trust boundaries (do not weaken these)
 
 - The harness decides. Nothing an agent prints changes control flow. `Adapters.last_claim` is
-  for the log only.
+  for the log and the next attempt's handoff note only.
 - Holdout content never reaches a prompt. The failure note for a holdout failure is the fixed
-  `Night::HIDDEN_FAIL_NOTE`.
+  `Night::HIDDEN_FAIL_NOTE`, and `Handover` only reads the attempt's own diff outside test paths.
 - Protected files are checked three times: by the pi guard during the session, by
   `Gates.integrity` on the staged diff, and by `contract.lock` hashes in `Night#preflight`.
 - The worker's clone has no remotes, and nightshift never pushes or merges. `ns land` only
@@ -216,7 +216,7 @@ is code that someone who knows Ruby but not this project can read, change and tr
 | Add a placeholder for adapters | Add it to `Adapters.base_vars`, or to the `extra_vars` passed by `Night#attempt`, and list it in the comment at the top of `adapters.rb` and `adapters.yml`. |
 | Add a gate | Write the check in `Gates`, returning a `Gates::Result`, and call it from `Verifier#verify` in cost order: cheap static checks before running commands. Add its config key to `Project::DEFAULTS["gates"]`, and add a unit test plus, if it involves the agent, a night scenario. |
 | Add a config setting | Add it to `Project::DEFAULTS` with a comment, document it in `templates/project.yml`, and read it from `cfg`. |
-| Change what the worker is told | Edit `templates/prompts/worker.md`, plus `Briefing` if you need a new `{{PLACEHOLDER}}`. A project can override any prompt in `<state>/prompts/`. |
+| Change what the worker is told | Edit `templates/prompts/worker.md`, plus `Briefing` if you need a new `{{PLACEHOLDER}}` (and `Handover` if it is carried over from earlier sessions). A project can override any prompt in `<state>/prompts/`. |
 | Add a command | Put the work in a service (a new file in `lib/nightshift/`, required from `lib/nightshift.rb`) that prints through `UI` and raises `Error`. In `CLI`, add `desc "name STATE_DIR", "..."`, a `method_option` for each option (with `type:`, `default:` and `desc:`), and a method of the same name that checks the option values and calls the service. Add a test to `test/cli_test.rb`, an example to README section 2, and the file to `lib/ARCHITECTURE.md`. |
 | Change the task format | Update `Plan` (accessors and `problems`), the planner prompt, and the task format in README section 7. |
 

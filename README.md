@@ -251,7 +251,7 @@ Karpathy's "keep the AI on a leash" and his autonomy slider ([field guide](https
 ### The Ralph loop ([ghuntley](https://ghuntley.com/ralph/), [snarktank/ralph](https://github.com/snarktank/ralph))
 
 Each iteration is a fresh session with one task, and state lives in files rather than in the context window.
-- **Adopted:** each attempt is a new agent process (`pi -p --no-session`). The prompt prefix stays stable, which keeps the llama.cpp prompt cache useful ([why](https://www.vincentschmalbach.com/why-llamacpp-reprocesses-the-whole-prompt-after-every-tool-call-and-how-to-keep-the-kv-cache-warm/)). Memory between attempts is a short failure note plus `progress.txt`, both written by the harness.
+- **Adopted:** each attempt is a new agent process (`pi -p --no-session`). The prompt prefix stays stable, which keeps the llama.cpp prompt cache useful ([why](https://www.vincentschmalbach.com/why-llamacpp-reprocesses-the-whole-prompt-after-every-tool-call-and-how-to-keep-the-kv-cache-warm/)). Memory between attempts is a warm handoff written by the harness: the failure note, what each discarded attempt changed and said, the definitions earlier tasks added, and `progress.txt` (see [Warm handoff](#warm-handoff)). The KV cache itself is not carried over.
 - **Avoided:** letting the agent decide it is done. Its `DONE` line is only logged.
 
 ### harnex ([repo](https://github.com/jikkuatwork/harnex))
@@ -308,7 +308,7 @@ Write-ups on verification layers ([Opslane](https://dev.to/0xgosu/agents-that-ru
 1. **The orchestrator owns everything that matters:** the loop, time, git, verification, the keep/discard decision and stopping. The model only edits files.
 2. **The contract is made while you are awake.** A strong planner turns requirements into tasks plus acceptance tests, and you review them. `ns check` proves that every check currently fails. `ns approve` freezes the contract.
 3. **Small tasks for a small model.** Aim for about 8 agent turns, 1–2 files, and a check that runs in under 2 minutes.
-4. **One fresh session per attempt.** The repo is reset to the last good commit first. The next attempt sees a distilled failure note, not the previous transcript.
+4. **One fresh session per attempt.** The repo is reset to the last good commit first. The next attempt sees a distilled handoff, not the previous transcript: the failure note, a summary of each discarded attempt (files, definitions, last answer) and the definitions that kept tasks added.
 5. **Fail fast and move on.** A task is blocked after `max_attempts`, or after the same failure appears twice with the same diff. The other tasks continue, and tasks that depend on the blocked one wait.
 6. **Escalate instead of looping.** If `roles.escalate` is set, a task's last attempt uses that adapter, up to `max_escalations` per night.
 7. **The harness decides when to stop, not the agent.** A run ends when any of these happens:
@@ -321,6 +321,21 @@ Write-ups on verification layers ([Opslane](https://dev.to/0xgosu/agents-that-ru
 8. **Durable.** State is written atomically, the journal is append-only, and the harness recovers from crashes. The model server is health-checked before each attempt and restarted through `server.start_cmd`.
 9. **Agnostic by data.** Agents are YAML entries in `adapters/adapters.yml`, and roles map to adapters per project. Prompts are templates that a project can override. Gates are shell commands in any language.
 10. **Nothing reaches your real repo automatically.** The worker edits `<state>/repo`, a clone with its remotes removed, on its own branch. `ns land` prints the merge commands, and you run them yourself. With `ns init --in-place` the worker edits your repo on its own branch instead, and nightshift refuses to start, or stops, rather than discard anything it did not make. [TRADEOFFS.md](TRADEOFFS.md) explains why the clone is the default.
+
+### Warm handoff
+
+Every attempt is a fresh agent session: no transcript and no KV cache carry over, so a bad
+context cannot poison the next try. What the harness hands over instead (`Handover`, built from
+what it saw, never from test or holdout files):
+
+| Situation | What the new session gets (in `prompt.md`) |
+|---|---|
+| Retry of a task | The latest failure note (gate output, path mistakes), and for every discarded attempt (up to 4 older ones): the files it changed, the definitions it wrote (for example `src/lib/time.ts: export function phaseAt(jd: number): number`) and its last DONE/STUCK line. |
+| Escalation | The same as a retry: the escalation adapter gets the same prompt, so it sees all the local attempts. |
+| A later task | "Already in the repository": the definitions each kept task added, with their signatures and the task id, so the worker imports them instead of writing its own. |
+
+The records live in `state.json` (`tasks.<id>.tried` for discarded attempts, `tasks.<id>.added`
+for kept ones). `ns approve` clears `tried` when it unblocks a task.
 
 ## 5. Configuration (`nightshift.yml`)
 
@@ -487,20 +502,22 @@ the journal.
 ## 10. What has been tested
 
 **Tested (Ruby 4.0.9):**
-- `rake test` runs 63 tests and they all pass, and `rake lint` reports no offenses.
+- `rake test` runs 70 tests and they all pass, and `rake lint` reports no offenses.
   - The gate unit tests cover path matching, integrity, stray paths, the hard-code scan, plan validation, fingerprints, deadlines, YAML times and placeholders.
+  - The handover unit tests cover finding definitions in a diff (TypeScript, Python, Ruby, Go), skipping test files, the attempt summaries and the caps.
   - A full simulated night with the fake agent covers these scenarios:
     1. an honest pass;
-    2. a pass on the 2nd attempt, with the failure note in the prompt;
-    3. a tampered protected test is rejected;
-    4. hard-coding is caught only by the hidden holdout, and the holdout's content does not leak;
-    5. a hang is killed at the timeout;
-    6. the agent's own commit is folded in and its false DONE is ignored;
-    7. a regression blocks the task and earlier work stays intact;
-    8. a skip marker is rejected;
-    9. a task that depends on a blocked one waits;
-    10. a wrong path is rejected and the retry passes with the corrected path in its prompt;
-    11. crash recovery and the STOP file work.
+    2. a pass on the 2nd attempt, with the failure note and what attempt 1 wrote and said in the prompt;
+    3. a later task's prompt lists the definitions an earlier kept task added;
+    4. a tampered protected test is rejected;
+    5. hard-coding is caught only by the hidden holdout, and the holdout's content does not leak;
+    6. a hang is killed at the timeout;
+    7. the agent's own commit is folded in and its false DONE is ignored;
+    8. a regression blocks the task and earlier work stays intact;
+    9. a skip marker is rejected;
+    10. a task that depends on a blocked one waits;
+    11. a wrong path is rejected and the retry passes with the corrected path in its prompt;
+    12. crash recovery and the STOP file work.
   - A project from scratch: `init --new` creates the repo, the planner prompt asks for a skeleton, `ns check` rejects a check whose tool is missing, and then a run builds three dependent features on an empty repo (one commit per task).
   - In place (`init --in-place`), on a repo with a remote and an ignored `.env`: the branch is created in the repo itself, a night commits there and leaves `main` alone, the `.env` survives the reset after a failed attempt, `ns run` refuses to start when the repo has a file it did not make (and the file is kept) or is on another branch, `ns init` refuses a dirty repo or a state dir inside the repo, `doctor` passes with the remote present, and `land` prints no fetch.
   - Finding programs: `.cmd` shims and App Execution Aliases (a Store-installed `pwsh` in `server.start_cmd`) are found on PATH.
@@ -537,7 +554,7 @@ nightshift/
     plan.rb       tasks.json validation      project.rb    config, defaults, state files
     adapters.rb   launching agents           exec.rb       processes, timeouts, tree kill
     git.rb        git                        machine.rb    model server watchdog, notify
-    prompts.rb    prompt templates
+    prompts.rb    prompt templates           handover.rb   warm handoff between sessions
     pane.rb       ns run --tmux: agents in tmux panes   pane_runner.rb  runs inside a pane (standalone)
   adapters/adapters.yml            agent catalog (data)
   adapters/pi/unattended-guard.ts  pi extension

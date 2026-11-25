@@ -18,7 +18,7 @@
 #   FAKE: guardlog <<<json>>>              append an event to guard.jsonl next to the prompt,
 #                                          as the pi guard extension would
 #
-# The attempt number is 1 + the number in "Attempt N failed" (the harness's failure note).
+# The attempt number is 1 + the highest N in "Attempt N failed" (the harness's failure note).
 
 require "fileutils"
 
@@ -27,7 +27,7 @@ CONTENT = /\A(\S+)\s*<<<(.*)>>>\s*\z/
 
 prompt_file = ARGV.fetch(0)
 prompt = File.read(prompt_file, encoding: "UTF-8")
-attempt = (prompt[/Attempt (\d+) failed/, 1] || 0).to_i + 1
+attempt = (prompt.scan(/Attempt (\d+) failed/).flatten.map(&:to_i).max || 0) + 1
 
 prompt.each_line(chomp: true) do |line|
   match = DIRECTIVE.match(line) or next

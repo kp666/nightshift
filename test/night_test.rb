@@ -144,6 +144,23 @@ class NightTest < Minitest::Test
     assert_includes File.read(File.join(run_dir("*-T02-a2"), "prompt.md")), "Attempt 1 failed"
   end
 
+  # Warm handoff: the retry sees what the discarded attempt wrote and said; every task sees the
+  # definitions that earlier kept tasks added.
+  def test_retry_sees_what_the_failed_attempt_did
+    prompt = File.read(File.join(run_dir("*-T02-a2"), "prompt.md"))
+
+    assert_includes prompt, "It changed: `src/calc.rb`"
+    assert_includes prompt, "`src/calc.rb: def div(a, b)`"
+    assert_includes prompt, "Its last answer: \"DONE fake attempt 1\""
+    assert_equal ["src/calc.rb: def div(a, b)"], task("T02")["tried"].first["defs"]
+  end
+
+  def test_later_tasks_see_what_earlier_tasks_added
+    assert_equal ["src/calc.rb: def add(a, b)"], task("T01")["added"]
+    assert_includes File.read(File.join(run_dir("*-T01-a1"), "prompt.md")), "(nothing yet)"
+    assert_includes File.read(File.join(run_dir("*-T02-a1"), "prompt.md")), "- `src/calc.rb: def add(a, b)` (T01)"
+  end
+
   def test_tampering_with_a_test_is_rejected
     assert_equal "blocked", status("T03"), log_hint
     assert_equal "integrity", task("T03")["blocked_gate"]

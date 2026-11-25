@@ -41,9 +41,18 @@ Checks the harness will run (all must exit 0):
 
 {{NOTES}}
 
-## Previous attempt
+## Previous attempts of this task
+
+Each attempt starts from the last good commit, so nothing below is in the repository now. Do not
+repeat an approach that failed; read the failure and change what caused it.
 
 {{LAST_FAILURE}}
+
+## Already in the repository (added by earlier tasks)
+
+Use these where they fit instead of writing your own; they are tested and committed.
+
+{{BUILT}}
 
 ## Recent progress (other tasks)
 

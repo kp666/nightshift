@@ -57,7 +57,8 @@ Layers, bottom to top. A file only calls files in its own layer or below.
 | `adapters.rb` | The only code that knows how an agent is started. Adapters are data (`adapters/adapters.yml` plus `nightshift.yml` overrides); this fills `{placeholders}` and runs the agent headless (`Exec`) or on screen (`Pane`). Returns the exit code and the agent's last DONE/STUCK line. | `Adapters.run_agent`, `run_interactive`, `render`; `Adapters::Run` |
 | `gates.rb` | The deterministic checks, as pure functions: integrity (protected files, deleted tests, skip markers), stray paths, running check commands, installing holdout files, the advisory hard-code scan. | `Gates.integrity`, `stray_paths`, `run_commands`, `install_holdout`, `hardcode_scan`; `Gates::Result` |
 | `verifier.rb` | Runs the gates on one staged attempt in order, cheapest first: integrity, paths, setup, task checks, holdout, regression, global. It copies holdout tests into the repo only while checks run. | `Verifier#verify` → `Verdict` (result + advisories) |
-| `briefing.rb` | Builds the worker prompt for one attempt from `worker.md`: the task, verified file paths (existing or new), the repo layout, the last failure note, recent progress. | `Briefing#worker_prompt` |
+| `briefing.rb` | Builds the worker prompt for one attempt from `worker.md`: the task, verified file paths (existing or new), the repo layout, the earlier attempts of this task, what earlier tasks added, recent progress. | `Briefing#worker_prompt` |
+| `handover.rb` | The warm handoff, as pure functions: the definitions a diff adds (outside test files), the record of a discarded attempt (files, definitions, last answer), and the prompt text for earlier attempts and for what kept tasks added. `Night` records, `Briefing` renders. | `Handover.definitions`, `attempt_record`, `previous_attempts`, `built` |
 | `night.rb` | The loop (see "One night" below). Owns `state.json`, `journal.jsonl` and `progress.txt` while it runs. | `Night#run`, `Night.deadline`, `Night.fingerprint` |
 | `pane.rb` | Tmux mode: launches `ns run` in a tmux session, opens one pane per attempt, waits for the agent's exit code, kills it on timeout, closes the last pane at the end. | `Pane.open_night`, `host_night`, `Pane#run`, `#close` |
 | `pane_runner.rb` | Standalone script run inside a pane: starts the agent from a JSON spec, writes its pid and exit code to files, then lingers so the last screen stays readable. | `ruby pane_runner.rb SPEC.json` |
@@ -82,7 +83,7 @@ Layers, bottom to top. A file only calls files in its own layer or below.
 CLI ──► Setup | Planner | Checker | Approval | Doctor | Report | Night (| Pane for --tmux)
                  │          │                    │                  │
                  ▼          ▼                    ▼                  ▼
-              Adapters   Gates               Machine        Briefing, Adapters, Verifier, Git, Report
+              Adapters   Gates               Machine        Briefing, Handover, Adapters, Verifier, Git, Report
                  │                                                     │           │
                  ▼                                                     ▼           ▼
              Exec | Pane ──► (tmux) ──► pane_runner.rb ──► agent     Gates       Exec
@@ -108,8 +109,10 @@ everything ──► Project, Plan, Util, UI, Prompts
      budget, never past the deadline);
    - stage everything the agent did (`Git#stage_all_from`, which folds the agent's own commits
      back into the index), save `diff.patch`, run `Verifier#verify`;
-   - **keep**: commit with the harness's message, move `state["head"]`, mark the task passed;
-   - **discard**: reset the repo, write `last-failure-<id>.txt` for the next attempt, and block
+   - **keep**: commit with the harness's message, move `state["head"]`, mark the task passed,
+     record the definitions it added (`ts["added"]`, shown to later tasks);
+   - **discard**: reset the repo, record what the attempt did (`ts["tried"]`), write
+     `last-failure-<id>.txt` for the next attempt, and block
      the task after `max_attempts` or when the same failure (fingerprinted) repeats with the
      same diff.
 5. **Finish**: log the reason, write `REPORT.md`, run the notifier. Exit 0 only if every task
@@ -135,7 +138,7 @@ everything ──► Project, Plan, Util, UI, Prompts
 | `nightshift.yml`, `requirements.md` | `Setup`, then the human | `Project`, `Planner` |
 | `tasks.json`, `holdout/` | `Planner` (harvest), the human | `Plan`, `Checker`, `Night`, `Verifier` |
 | `contract.lock` | `Approval` | `Night` preflight (protected file hashes), `Doctor`, `Report` (the base commit) |
-| `state.json` | `Night`, `Approval` | `Night`, `Report` |
+| `state.json` (incl. the handoff records `tasks.<id>.tried` and `.added`) | `Night`, `Approval` | `Night`, `Report`, `Briefing` |
 | `journal.jsonl`, `progress.txt` | `Night` | `Report`, `Briefing` |
 | `last-failure-<id>.txt` | `Night#on_failure` | `Briefing` |
 | `runs/<tag>/` | `Night`, `Adapters`, `Pane`, `Gates` | the human, `Night.path_events` (the pi guard's path log) |

@@ -297,10 +297,10 @@ module Nightshift
       ts["advisories"] = (Array(ts["advisories"]) + verdict.advisories).uniq.sort if verdict.advisories.any?
 
       if result.ok?
-        keep(task, ts, night, tag: tag, adapter: adapter_name, changed: changed, minutes: minutes)
+        keep(task, ts, night, tag: tag, adapter: adapter_name, changed: changed, minutes: minutes, patch: patch)
       else
         git.reset_to(head)
-        on_failure(task, ts, night, result: result, run: run, changed: changed, patch: patch,
+        on_failure(task, ts, night, result: result, run: run, changed: changed, patch: patch, adapter: adapter_name,
                                     number: number, max_attempts: max_attempts, path_lines: path_lines)
       end
       state["inflight"] = ""
@@ -325,20 +325,22 @@ module Nightshift
       "escalate"
     end
 
-    def keep(task, ts, night, tag:, adapter:, changed:, minutes:)
+    # Commit the attempt. Its new definitions are handed to later tasks' prompts (Handover).
+    def keep(task, ts, night, tag:, adapter:, changed:, minutes:, patch:)
       id = task["id"]
       sha = git.commit_index("#{id}: #{task['title']}", "nightshift #{tag}\nadapter: #{adapter}")
       state["head"] = sha
       git.reset_to(sha)
       night["consec_fail"] = 0
-      ts.merge!("status" => "passed", "commit" => sha, "minutes" => minutes, "last_err" => "", "last_diff" => "")
+      ts.merge!("status" => "passed", "commit" => sha, "minutes" => minutes, "last_err" => "", "last_diff" => "",
+                "added" => Handover.definitions(patch, test_paths: @gates["test_paths"]).first(Handover::MAX_ADDED))
       progress("#{id} PASS on attempt #{ts['attempts']} (#{minutes} min). Files: #{changed.first(8).join(', ')}")
       FileUtils.rm_f(project.failure_file(id))
     end
 
-    # Write the failure note for the next attempt; block the task after max attempts or when the
-    # same failure happens twice with the same (or no) change.
-    def on_failure(task, ts, night, result:, run:, changed:, patch:, number:, max_attempts:, path_lines:)
+    # Write the failure note for the next attempt, with what this attempt did (Handover); block the
+    # task after max attempts or when the same failure happens twice with the same (or no) change.
+    def on_failure(task, ts, night, result:, run:, changed:, patch:, adapter:, number:, max_attempts:, path_lines:)
       id = task["id"]
       detail = result.gate == "holdout" ? HIDDEN_FAIL_NOTE : result.detail
       err_fp = self.class.fingerprint(detail)
@@ -355,6 +357,10 @@ module Nightshift
         note << "\nPath mistakes in that attempt (paths are relative to the repository root, which is " \
                 "your working directory):\n#{path_lines.join("\n")}\n"
       end
+      rec = Handover.attempt_record(number: number, adapter: adapter, why: why, changed: changed, patch: patch,
+                                    said: run.said, test_paths: @gates["test_paths"])
+      (ts["tried"] ||= []) << rec
+      note << "\nWhat that attempt did:\n#{Handover.what_it_did(rec)}\n"
       Util.write(project.failure_file(id), note)
       progress("#{id} FAIL attempt #{number} at #{result.gate.empty? ? 'agent' : result.gate}")
       night["consec_fail"] += 1

@@ -2,7 +2,8 @@
 
 module Nightshift
   # Builds the worker prompt for one attempt (templates/prompts/worker.md): the task, exact
-  # verified file paths, the repo layout, the previous failure note and recent progress.
+  # verified file paths, the repo layout, the earlier attempts of this task, what earlier tasks
+  # added (the warm handoff, see Handover) and recent progress.
   class Briefing
     def initialize(night)
       @night = night
@@ -16,7 +17,7 @@ module Nightshift
                     "DESCRIPTION" => task["description"], "FILES" => files, "LAYOUT" => layout,
                     "CHECKS" => checks(task), "NOTES" => task["notes"],
                     "PROGRESS" => recent_progress, "PROTECT" => @night.protect.join(", "),
-                    "LAST_FAILURE" => last_failure(task))
+                    "LAST_FAILURE" => last_failure(task), "BUILT" => built)
     end
 
     # Exact paths for the prompt: each task file marked as existing or new (and corrected when
@@ -52,8 +53,17 @@ module Nightshift
     end
 
     def last_failure(task)
-      note = Util.read(@project.failure_file(task["id"]))
-      note.empty? ? "(first attempt)" : note
+      Handover.previous_attempts(@night.task_state(task["id"])["tried"],
+                                 Util.read(@project.failure_file(task["id"])))
+    end
+
+    # Definitions added by the tasks kept so far, in plan order.
+    def built
+      kept = @night.tasks.filter_map do |task|
+        ts = @night.task_state(task["id"])
+        [task["id"], ts["added"]] if ts["status"] == "passed"
+      end
+      Handover.built(kept)
     end
   end
 end

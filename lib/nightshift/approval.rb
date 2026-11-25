@@ -58,7 +58,7 @@ module Nightshift
       state["tasks"].each do |id, ts|
         next unless ts["status"] == "blocked"
 
-        ts.merge!("status" => "pending", "attempts" => 0, "last_err" => "", "last_diff" => "")
+        ts.merge!("status" => "pending", "attempts" => 0, "last_err" => "", "last_diff" => "", "tried" => [])
         FileUtils.rm_f(project.failure_file(id))
       end
     end
