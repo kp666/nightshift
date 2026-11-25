@@ -29,7 +29,8 @@ The diagram below shows the overnight case.
 It is written in Ruby 4.0. Running it needs one gem, [Thor](https://github.com/rails/thor), for
 the command line; developing it uses a few more (see [Dependencies](#dependencies)).
 It was built for Windows first and also runs on Linux and macOS. How the code is organised and
-the style it follows are described in [CONVENTIONS.md](CONVENTIONS.md). The choices that cost
+the style it follows are described in [CONVENTIONS.md](CONVENTIONS.md); what each file does and
+how they work together is mapped in [lib/ARCHITECTURE.md](lib/ARCHITECTURE.md). The choices that cost
 something, such as why the worker gets its own clone of your repo and when to let it work in
 your repo instead (`--in-place`), are explained in [TRADEOFFS.md](TRADEOFFS.md).
 
@@ -70,8 +71,8 @@ Without changing the PATH, run `ruby C:\path\to\nightshift\bin\ns ...`.
 Check the install by running the self-test from the nightshift folder. It takes about a minute.
 
 ```powershell
-rake test                 # 38 tests: gate unit tests, the CLI, a simulated night, a project from scratch
-rake guard                # 13 checks of the pi guard extension (Node)
+rake test                 # 63 tests: gate unit tests, the CLI, a simulated night, a project from scratch, in place, tmux mode, docs
+rake guard                # 17 checks of the pi guard extension (Node)
 ```
 
 ### Dependencies
@@ -129,12 +130,13 @@ notepad C:\nightshift\myproj\requirements.md
 ns plan    C:\nightshift\myproj      # an interactive Claude Code session writes tasks + tests with you
 ns check   C:\nightshift\myproj      # validates the plan; every acceptance check must FAIL now
 ns approve C:\nightshift\myproj      # commits the contract, hashes protected files
-ns doctor  C:\nightshift\myproj      # preflight: config, adapters, model server, git, contract
+ns doctor  C:\nightshift\myproj      # preflight: config, adapters, model server (and its start_cmd), git, contract
 
 # start it now and walk away; it stops when the work is done (or a safety stop trips)
 ns run C:\nightshift\myproj
 #   with a limit:  ns run C:\nightshift\myproj --hours 3      (or --until 18:00)
 #   overnight:     ns run C:\nightshift\myproj --until 07:00
+#   watch it live: ns run C:\nightshift\myproj --tmux      (see "Watching a night live" below)
 #   (nightshift does not keep the PC awake: set Windows to never sleep while plugged in,
 #    e.g. `powercfg /change standby-timeout-ac 0`, or start ns run from Task Scheduler yourself)
 
@@ -160,6 +162,34 @@ To use a different planner, run `ns plan <state> --print-prompt`. It prints the 
 which you can give to any chat or agent working in the clone (or in your repo, in place).
 Afterwards, collect the result with `ns plan <state> --harvest`.
 
+### Watching a night live (`--tmux`)
+
+`ns run <state> --tmux` runs the night in a tmux session and shows each attempt's agent working
+on its own screen, live: pi's interactive screen with the prompt, every tool call and its output.
+It needs `tmux` on PATH (on Windows: `winget install marlocarlo.psmux`).
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ the loop's log: [attempt] ... [result] ... KEEP / REVERT      │  top: ns run itself
+├─ 20261120-094633-001-T01-a1 add ─────────────────────────────┤
+│ pi working on T01: reads, edits, runs the checks ...         │  bottom: this attempt's agent
+└──────────────────────────────────────────────────────────────┘
+```
+
+- From a normal terminal, `--tmux` starts a session named `ns-<project>` and attaches to it.
+  Detach with Ctrl+b d; the night keeps running. Come back with `tmux attach -t ns-<project>`.
+  Started from a script (no terminal), it starts the session and prints that command.
+- The harness still owns the agent. It starts the agent in a new pane, enforces the attempt's
+  time limit (on timeout it kills the agent's whole process tree and the pane), and judges the
+  result with the gates as usual. Closing the agent's pane by hand ends that attempt as failed.
+- A finished attempt's pane stays open, showing its last screen, until the next attempt starts.
+  When the night ends, the top pane shows the summary and waits for Enter, which closes the session.
+- Do not type in the agent's pane: you would be talking to the agent mid-attempt.
+- pi saves each attempt's session in `<run_dir>/session/`. The pane prints the command that
+  reopens it (`pi --session-dir ... --session ...`), so you can look through it or continue it later.
+- Only adapters with a `pane_cmd` run on screen (`pi-local` and `pi-openrouter` in the catalog);
+  others run headless as usual, even in tmux mode (see section 6).
+
 ### Starting a project from scratch
 
 ```powershell
@@ -176,9 +206,11 @@ in a structure than inventing one. So when the repo is empty, `ns plan` tells th
 - install every dependency the plan will need;
 - set up the test runner with one passing test;
 - create the folder layout and `AGENTS.md`;
-- tell you which `project.bootstrap` and `gates.global` lines to add to `nightshift.yml`.
+- tell you which `project.bootstrap`, `gates.global` and `gates.protect` lines to add to
+  `nightshift.yml`, giving only commands it has run on the skeleton and seen pass.
 
-Only after that does it plan the features as small tasks on top of the skeleton. `ns check`
+If your requirements are only a goal, the planner proposes the scope (what is in, what is out,
+how many tasks) and waits for you to agree before planning. Only after that does it plan the features as small tasks on top of the skeleton. `ns check`
 rejects any check whose tool is not installed ("command not found"), so a missing test runner
 is caught at the keyboard, not after a wasted night. `ns approve` commits the skeleton together
 with the contract.
@@ -187,7 +219,8 @@ What to expect: a small model does well on many small, well-specified tasks on t
 skeleton. Architecture, the choice of libraries and UI design should stay with you and the
 planner. If tasks keep getting blocked, they are too big; split them and run again.
 
-For the astro project, start from `examples/astro/nightshift.yml` and `examples/astro/requirements.md`.
+For a project whose code must match a reference library, start from
+`examples/port-library/nightshift.yml` and `examples/port-library/requirements.md`.
 The comments at the top of the YAML file list what to commit before running `ns init`.
 
 ## 3. Research synthesis
@@ -225,7 +258,8 @@ Each iteration is a fresh session with one task, and state lives in files rather
 
 harnex has per-agent adapters and builds a receipt from the git state it observes, never from the worker's claims.
 - **Adopted:** adapters, and proof built from what the harness observed. Exit code 124 means a timeout.
-- **Not adopted:** driving agents through tmux/PTY, which has no Windows support. Here, adapters are data rather than code.
+- **Adopted later, differently:** watching agents in tmux. `ns run --tmux` (psmux on Windows) shows each agent's own screen in a pane, but the harness still starts it, times it out and reads the result from files and gates, never from the screen.
+- **Not adopted:** driving agents by typing into a PTY. Here, adapters are data rather than code.
 
 ### pi-durable ([post](https://earendil.com/posts/pi-durable/))
 
@@ -340,6 +374,7 @@ Placeholders:
 | `{ruby}` | The Ruby that runs nightshift |
 | `{container}` | A unique name for Docker |
 | `{protect_csv}`, `{guard_minutes}`, `{max_turns}` | Limits for the pi guard |
+| `{out}` | The attempt's transcript file (`worker.out`); in tmux mode the agent writes its final answer there |
 
 Catalog:
 
@@ -353,7 +388,19 @@ Catalog:
 | `codex` | Unverified |
 | `fake` | Deterministic agent for tests and dry runs (`adapters/fake_agent.rb`) |
 
-**New LoRA or model:** copy `pi-local` under a new name, change `--model`, and set `roles.worker` to the new name.
+**Watched runs (`pane_cmd`):** for `ns run --tmux`, an adapter can also say how to run the agent
+on its own interactive screen in a tmux pane. `pane_cmd` is that argv, and `pane_env` adds
+environment on top of `env`. The agent must exit by itself when it has finished, and write its
+final answer (the DONE/STUCK line) to `{out}`. For pi, the guard does both:
+
+```yaml
+    pane_cmd: [pi, --offline, --session-dir, "{run_dir}/session", --model, llama-cpp/qwen3.8-pi, ...]
+    pane_env: { PI_GUARD_FINAL: "{out}", PI_GUARD_EXIT_ON_SETTLE: "1" }
+```
+
+Without `pane_cmd`, an adapter runs headless even in tmux mode.
+
+**New LoRA or model:**  copy `pi-local` under a new name, change `--model`, and set `roles.worker` to the new name.
 
 **New agent CLI:** add an entry with its headless command. It only has to accept a prompt, edit
 files in its working directory and exit. Then try it on a small plan with `ns run <state> --max-iterations 1`.
@@ -370,10 +417,14 @@ It is active only when `PI_GUARD=1`. It enforces:
 
 It complements the gates rather than replacing them.
 
+In tmux mode it also does two jobs for the interactive screen: `PI_GUARD_FINAL=<file>` saves
+the agent's last answer to that file when it finishes, and `PI_GUARD_EXIT_ON_SETTLE=1` quits pi
+once the agent has settled (without it, pi's interactive screen would wait for your next message).
+
 ### Wrong paths (a known weakness of local models)
 
 Qwen through pi sometimes garbles paths. For example, it may glue a mangled project folder on
-the front (`k Kerala-astro-…/src/lib/x.ts`), use an absolute path into another checkout, get
+the front (`k My-app-…/src/lib/x.ts`), use an absolute path into another checkout, get
 the case wrong, add a stray space, or drop a leading folder. Recovery happens in four layers:
 
 | Layer | When | What it does |
@@ -436,7 +487,7 @@ the journal.
 ## 10. What has been tested
 
 **Tested (Ruby 4.0.9):**
-- `rake test` runs 46 tests and they all pass, and `rake lint` reports no offenses.
+- `rake test` runs 63 tests and they all pass, and `rake lint` reports no offenses.
   - The gate unit tests cover path matching, integrity, stray paths, the hard-code scan, plan validation, fingerprints, deadlines, YAML times and placeholders.
   - A full simulated night with the fake agent covers these scenarios:
     1. an honest pass;
@@ -452,12 +503,18 @@ the journal.
     11. crash recovery and the STOP file work.
   - A project from scratch: `init --new` creates the repo, the planner prompt asks for a skeleton, `ns check` rejects a check whose tool is missing, and then a run builds three dependent features on an empty repo (one commit per task).
   - In place (`init --in-place`), on a repo with a remote and an ignored `.env`: the branch is created in the repo itself, a night commits there and leaves `main` alone, the `.env` survives the reset after a failed attempt, `ns run` refuses to start when the repo has a file it did not make (and the file is kept) or is on another branch, `ns init` refuses a dirty repo or a state dir inside the repo, `doctor` passes with the remote present, and `land` prints no fetch.
-  - The command line: `--version` and `help`, unknown options and missing arguments fail with exit 1, errors are one line on stderr, bad `--until`/`--hours` values are rejected before any work, `init` refuses an existing state dir, `land` prints the right commands, and `stop` writes the STOP file.
-- `rake guard` runs 13 checks of the pi guard's path repair, and they all pass.
+  - Finding programs: `.cmd` shims and App Execution Aliases (a Store-installed `pwsh` in `server.start_cmd`) are found on PATH.
+  - The code map: `lib/ARCHITECTURE.md` names every file under `lib/`, and names no file that is gone.
+  - Tmux mode: the pane runner reports the agent's pid and exit code (127 when it cannot start); adapters use `pane_cmd`/`pane_env` in a pane and fall back to headless without them. With tmux installed, real panes are tested too: the exit code comes back, a finished pane stays open until the next attempt, a timeout kills the agent's whole process tree and the pane, a pane closed by hand ends the attempt, and the last pane is closed when the night ends.
+  - The command line: `--version` and `help`, unknown options and missing arguments fail with exit 1, errors are one line on stderr, bad `--until`/`--hours` values are rejected before any work, `init` refuses an existing state dir, `land` prints the right commands, `stop` writes the STOP file, and `doctor` reports a `server.start_cmd` whose program is not on PATH.
+- `rake guard` runs 17 checks of the pi guard (path repair, and the tmux-mode final answer and exit), and they all pass.
 - `init`, `plan --print-prompt`, `check --no-run`, `doctor`, `status` and `land` were run by hand.
+- A real one-task night with `pi-local` (pi 1.5.2, local model) in tmux mode (psmux 3.4): pi worked on screen and quit by itself, its DONE line reached the journal, the gates kept the work and the harness committed it, the session was saved in the run dir, and Enter at the end closed the tmux session.
+- Real multi-task nights with `pi-local` on a port of a Python astronomy library to JavaScript, planned with Claude Code: headless, 7 tasks passed on the 1st attempt before the night was killed with its host shell; in tmux mode, a fresh rerun passed all 14 tasks on the 1st attempt, holdouts included. The steps, what worked, what didn't and the prompt changes it led to are in [docs/trials/library-port-js.md](docs/trials/library-port-js.md).
 
 **Not tested yet:**
-- a real night with the local model (start with `ns run <state> --max-iterations 1` and llama-server up);
+- a worker given behaviour-level task descriptions instead of near-code ones (see the trial's caveats);
+- tmux mode on Linux/macOS tmux (it uses only standard tmux commands, but was run on psmux);
 - escalation to a real cloud adapter;
 - the Docker adapter, `codex` and `opencode-local`;
 - the in-place stop between attempts when the repo changes mid-run (it uses the same check as `ns run`'s refusal, which is tested).
@@ -468,6 +525,7 @@ the journal.
 nightshift/
   bin/ns, ns.cmd                   entry points (ns.cmd is for cmd/PowerShell on Windows)
   lib/nightshift.rb                loads everything; VERSION, HOME, Error
+  lib/ARCHITECTURE.md              map of the code: each file's job, the call graph, the night loop, state files
   lib/nightshift/
     cli.rb        the ns commands (Thor)     ui.rb         what the commands print (✔/✘, ok/FAIL)
     setup.rb      ns init                    planner.rb    ns plan: prompt, planner run, harvest
@@ -480,15 +538,17 @@ nightshift/
     adapters.rb   launching agents           exec.rb       processes, timeouts, tree kill
     git.rb        git                        machine.rb    model server watchdog, notify
     prompts.rb    prompt templates
+    pane.rb       ns run --tmux: agents in tmux panes   pane_runner.rb  runs inside a pane (standalone)
   adapters/adapters.yml            agent catalog (data)
   adapters/pi/unattended-guard.ts  pi extension
   adapters/fake_agent.rb           deterministic agent for tests
   templates/                       project.yml, requirements.md, prompts/{worker,planner,planner-new}.md
-  examples/astro/                  config + requirements for kerala-astro v3
+  examples/port-library/           config + requirements for an app that must match a reference library
   test/                            minitest suites + the guard test (Node)
   Rakefile                         rake test, rake lint, rake guard
   Gemfile, Gemfile.lock            thor (runtime); minitest, rake, rubocop (development)
   .rubocop.yml, .rubocop_todo.yml  lint rules; known size debt
+  docs/trials/                     write-ups of real trial runs (library-port-js.md)
   TRADEOFFS.md                     design trade-offs: clone vs. in place, and why the clone is the default
   AGENTS.md, CLAUDE.md             rules for coding agents that change nightshift (CLAUDE.md imports AGENTS.md)
   .claude/                         Claude Code hook: reminds the agent to update the docs with the code

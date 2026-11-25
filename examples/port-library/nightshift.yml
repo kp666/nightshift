@@ -1,15 +1,16 @@
-# nightshift config for kerala-astro version 3 (Vite + React + TS, vitest, jsdom).
-# Use: ns init C:/path/to/nightshift-state/astro --source C:/path/to/kerala-astro-v3
+# nightshift config for an app (Vite + React + TS, vitest, jsdom) whose calculation module must
+# match a reference library.
+# Use: ns init /path/to/nightshift-state/my-app --source /path/to/my-app
 #      then copy this file over the generated nightshift.yml (keep the generated branch name),
-#      and replace every C:/path/to/... below with your real paths.
+#      and replace every /path/to/... below with your real paths.
 #
-# BEFORE `ns init`: v3 has uncommitted edits and an untracked spec/ folder. nightshift clones
-# COMMITTED state only, so commit that work first (on a branch of your choice).
+# BEFORE `ns init`: nightshift clones COMMITTED state only, so commit any uncommitted edits and
+# untracked folders (such as spec/) first, on a branch of your choice.
 
 project:
-  name: astro
-  source: C:/path/to/kerala-astro-v3
-  branch: nightshift/astro
+  name: my-app
+  source: /path/to/my-app
+  branch: nightshift/my-app
   bootstrap: ["npm ci --no-audit --no-fund"]   # attended, with network; node_modules is gitignored so it survives resets
   # vitest.config.ts only includes ./spec/test/**, so the contract tests must live there:
   acceptance_dir: spec/test/acceptance/
@@ -18,7 +19,7 @@ project:
 roles:
   worker: pi-local           # Qwen3.8-27B-pi-adapted via llama-server
   escalate: ""               # claude-code to spend cloud tokens on the last attempt of a task
-  planner: claude-code       # writes tasks + golden tests with you, using PyJHora as the oracle
+  planner: claude-code       # writes tasks + golden tests with you, using the reference library as the oracle
 
 budgets:
   until: ""                  # no time limit; use `ns run --until 07:00` for an overnight run
@@ -43,8 +44,7 @@ gates:
 
 server:
   health_url: http://127.0.0.1:8080/health
-  start_cmd: [pwsh, -NoProfile, -File,
-              C:/path/to/start-server.ps1]
+  start_cmd: [/path/to/start-server]
   down_grace_min: 10
 
 notify:
@@ -53,6 +53,6 @@ notify:
 adapters:
   pi-local:
     timeout_min: 60
-  # The planner needs to read PyJHora (outside the repo) to generate golden fixtures.
+  # The planner needs to read the reference library (outside the repo) to generate golden fixtures.
   claude-code:
-    interactive_cmd: [claude, --add-dir, C:/path/to/PyJHora, "{message}"]
+    interactive_cmd: [claude, --add-dir, /path/to/reference-lib, "{message}"]

@@ -96,7 +96,7 @@ module Nightshift
     def write_templates(state, name:, source:, branch:, in_place: false)
       template = Util.read(File.join(HOME, "templates", "project.yml"))
       vars = { "NAME" => name, "SOURCE" => Util.norm(source), "BRANCH" => branch,
-               "REPO" => in_place ? Util.norm(source) : "repo", "IN_PLACE" => in_place.to_s }
+               "REPO" => in_place ? Util.norm(source) : "repo", "IN_PLACE" => (in_place == true).to_s }
       Util.write(File.join(state, Project::CONFIG_FILE), Prompts.render(template, vars))
       FileUtils.cp(File.join(HOME, "templates", "requirements.md"), File.join(state, "requirements.md"))
       FileUtils.mkdir_p([File.join(state, "holdout"), File.join(state, "runs")])

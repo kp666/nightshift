@@ -30,7 +30,8 @@ module Nightshift
        [Exec.available?(@project.shell.first), "gate shell #{@project.shell.first}"],
        *adapter_checks,
        [File.file?(GUARD), "pi guard extension #{GUARD}"],
-       *server_check]
+       *server_check,
+       *start_cmd_check]
     end
 
     private
@@ -64,6 +65,16 @@ module Nightshift
 
       up = Machine.healthy?(url)
       [[up, "model server #{url}#{' (down; start it, or set server.start_cmd so nightshift starts it)' unless up}"]]
+    end
+
+    # The night starts the model server with start_cmd when it is down. A program that is not on
+    # PATH would only show up then, as a crash in the middle of the night.
+    def start_cmd_check
+      exe = Array(@project.cfg["server"]["start_cmd"]).first
+      return [] if exe.to_s.empty?
+
+      found = Exec.available?(exe)
+      [[found, "server start_cmd #{exe}#{' (not found on PATH)' unless found}"]]
     end
   end
 end

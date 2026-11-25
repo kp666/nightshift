@@ -62,7 +62,9 @@ module Nightshift
       [lines.uniq.first(12), fixed, missed]
     end
 
-    def initialize(project, until_time: nil, max_iterations: nil, fresh: false)
+    # +pane+: a Pane to run each attempt on screen in (`ns run --tmux`), or nil for headless.
+    def initialize(project, until_time: nil, max_iterations: nil, fresh: false, pane: nil)
+      @pane = pane
       @project = project
       @cfg = project.cfg
       @budgets = cfg["budgets"]
@@ -268,7 +270,7 @@ module Nightshift
                      msg: "[#{tag}] #{task['title']} via #{adapter_name}")
 
       run = Adapters.run_agent(spec, prompt_file: prompt_file, cwd: project.repo, run_dir: run_dir,
-                                     timeout_s: timeout_min * 60,
+                                     timeout_s: timeout_min * 60, pane: @pane, title: "#{tag} #{task['title']}",
                                      extra_vars: { "state" => project.dir, "protect_csv" => protect.join(","),
                                                    "guard_minutes" => [timeout_min - 8, 5].max.to_i.to_s,
                                                    "max_turns" => task.fetch("maxTurns", 50).to_s })

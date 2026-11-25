@@ -32,6 +32,7 @@ end
 
 require_relative "nightshift/util"
 require_relative "nightshift/exec"
+require_relative "nightshift/pane"
 require_relative "nightshift/git"
 require_relative "nightshift/plan"
 require_relative "nightshift/project"

@@ -36,7 +36,7 @@ case "$input" in *'"stop_hook_active":true'* | *'"stop_hook_active": true'*) exi
 
 if [ "$code" != "$old_code" ] && [ "$docs" = "$old_docs" ]; then
   cat <<'JSON'
-{"decision": "block", "reason": "Code changed in this turn but no .md file did. Per AGENTS.md, update the affected docs now (README.md, CONVENTIONS.md, templates/prompts/*.md, templates/project.yml), or say in one line why none need changes."}
+{"decision": "block", "reason": "Code changed in this turn but no .md file did. Per AGENTS.md, update the affected docs now (lib/ARCHITECTURE.md, README.md, CONVENTIONS.md, templates/prompts/*.md, templates/project.yml), or say in one line why none need changes."}
 JSON
 fi
 exit 0

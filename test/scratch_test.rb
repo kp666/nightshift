@@ -124,6 +124,7 @@ class ScratchTest < Minitest::Test
   def test_planner_is_told_to_build_the_skeleton
     assert_includes data["prompt"], "This is a new project"
     assert_includes data["prompt"], "every dependency"
+    assert_includes data["prompt"], "scope is the human's decision"
     refute_includes data["prompt"], "{{"
   end
 

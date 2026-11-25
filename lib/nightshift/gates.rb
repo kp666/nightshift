@@ -97,7 +97,7 @@ module Nightshift
       PASS
     end
 
-    # 2. paths. Local models garble paths: "k Kerala-astro-x/src/lib/a.ts", "<project>/src/...",
+    # 2. paths. Local models garble paths: "k My-app-x/src/lib/a.ts", "<project>/src/...",
     # " src/x.ts". Such a write creates a junk tree while the real file stays untouched.
     # Reject files added under a top-level folder that did not exist (and is not expected),
     # and point at the likely intended path.

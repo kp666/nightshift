@@ -16,7 +16,9 @@ module Nightshift
     module_function
 
     # Resolve a program name to a full path. On Windows this also finds npm-style shims
-    # (pi.cmd, npx.cmd) through PATHEXT, which Process.spawn would not do on its own.
+    # (pi.cmd, npx.cmd) through PATHEXT, which Process.spawn would not do on its own, and
+    # App Execution Aliases (pwsh.exe from the Store, winget.exe), which are reparse points that
+    # File.file? reports as not a file.
     def resolve(name)
       name = name.to_s
       return name if name.include?("/") || name.include?("\\")
@@ -31,10 +33,14 @@ module Nightshift
       ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).each do |dir|
         candidates.each do |candidate|
           path = File.join(dir, candidate)
-          return path if File.file?(path)
+          return path if runnable?(path)
         end
       end
       raise NotFound, "executable not found on PATH: #{name}"
+    end
+
+    def runnable?(path)
+      File.file?(path) || (WINDOWS && File.exist?(path) && !File.directory?(path))
     end
 
     def available?(name)

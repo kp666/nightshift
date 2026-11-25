@@ -31,6 +31,10 @@ is code that someone who knows Ruby but not this project can read, change and tr
   `lib/nightshift/`. `lib/nightshift.rb` requires the stdlib and Thor, defines the shared constants
   (`VERSION`, `HOME`, `CATALOG`, `PROMPTS`, `WINDOWS`) and `Error`, and loads the files in
   dependency order.
+- `lib/ARCHITECTURE.md` maps the code: each file's job, who calls whom, the night loop and
+  where state lives. Read it before the code, and update it in the same change whenever a file
+  under `lib/` is added, removed, renamed or split, or the calls between them change.
+  `test/docs_test.rb` fails if a `lib/` file is missing from it.
 - **Modules with `module_function`** hold stateless helpers: `Util`, `Exec`, `Plan`, `Gates`,
   `Adapters`, `Prompts`, `Machine` and `UI`, and the stateless command services
   `Setup` and `Approval`.
@@ -42,6 +46,7 @@ is code that someone who knows Ruby but not this project can read, change and tr
   - `Report` writes the morning report and the `status` and `land` text.
   - `Planner`, `Checker` and `Doctor` are command services built on a `Project`.
   - `CLI` is the Thor command line.
+  - `Pane` runs agents in tmux panes for `ns run --tmux`, and hosts the night in its session.
 - Keep each class to one job. When a class grows a second job, split it out as a
   collaborator, the way `Verifier` and `Briefing` were split from `Night`.
   `night.rb` (about 330 lines) is the ceiling for a class with real logic.
@@ -68,7 +73,9 @@ is code that someone who knows Ruby but not this project can read, change and tr
   the exception: it writes the night's event log, not UI.
 - **Nothing prompts.** Every command must work unattended (scripts, the Task Scheduler,
   tests), so there is no interactive input anywhere. The one interactive step, `ns plan`
-  without `--headless`, hands the terminal to the planner agent itself.
+  without `--headless`, hands the terminal to the planner agent itself. The other exception is
+  the end of `ns run --tmux`: inside its own tmux session, with a terminal, it waits for Enter so
+  the summary can be read before the session closes.
 - Name things after what they mean in the domain: gate, attempt, task, night, holdout,
   advisory. Do not name them after how they are implemented.
 - The process module is called `Exec`. Do not name anything `Process` or `Proc`, because
@@ -113,8 +120,15 @@ is code that someone who knows Ruby but not this project can read, change and tr
   (`taskkill /T /F` on Windows, the process group elsewhere) and the exit code is 124.
 - Output goes to files under the attempt's run directory, never to memory. An overnight
   transcript can be megabytes.
-- `Exec.resolve` finds `.cmd` and `.exe` shims through `PATHEXT`. Always resolve before
-  spawning, because `Process.spawn` does not do this on Windows.
+- In tmux mode (`Pane`), the agent runs in a pane through `lib/nightshift/pane_runner.rb`, still
+  without a shell: `tmux split-window -- ruby pane_runner.rb <spec.json>`, and every value
+  (argv, env, cwd) travels in the JSON spec, never on a command line. The runner writes the
+  agent's pid and exit code to files, because a pane's exit status is not reliable (psmux), and
+  the timeout kill uses that pid. The agent's own screen replaces the stdout file, so the adapter
+  must write its final answer to `{out}` (pi saves a session file too).
+- `Exec.resolve` finds `.cmd` and `.exe` shims through `PATHEXT`, and App Execution Aliases
+  (Store-installed `pwsh`, `winget`), which `File.file?` does not count as files. Always resolve
+  before spawning, because `Process.spawn` does not do this on Windows.
 - Git goes through the `Git` class (`Open3.capture3("git", "-C", repo, ...)`).
 
 ## 6. Trust boundaries (do not weaken these)
@@ -175,6 +189,11 @@ is code that someone who knows Ruby but not this project can read, change and tr
   for an empty repo, the missing-tool check, and a run).
 - `test/in_place_test.rb` covers `init --in-place` end to end: a night in the user's repo, and
   every refusal that protects the user's files.
+- `test/pane_test.rb` covers tmux mode: the pane runner, `pane_cmd` selection, and (when tmux
+  is installed, unless `NS_SKIP_TMUX=1`) real panes: exit codes, timeout kill, closed panes.
+- `test/exec_test.rb` covers finding programs on PATH, including App Execution Aliases.
+- `test/docs_test.rb` checks that `lib/ARCHITECTURE.md` names every file under `lib/` and no
+  file that no longer exists.
 - `test/cli_test.rb` covers the command line: dispatch, option checks, exit codes, and the
   commands `land` prints. Assert on exit codes, files and the commands a
   plan contains, not on the exact wording or layout of the output.
@@ -193,11 +212,12 @@ is code that someone who knows Ruby but not this project can read, change and tr
 | You want to | Do this |
 |---|---|
 | Support a new agent CLI, model or LoRA | Add an entry to `adapters/adapters.yml`; no code is needed. Try it on a small plan with `ns run <state> --max-iterations 1`. |
+| Let an agent run on screen with `ns run --tmux` | Give its adapter a `pane_cmd` (its interactive command) and, if needed, `pane_env`. The agent must exit by itself when done and write its final answer to `{out}`. Try it with `ns run <state> --tmux --max-iterations 1`. |
 | Add a placeholder for adapters | Add it to `Adapters.base_vars`, or to the `extra_vars` passed by `Night#attempt`, and list it in the comment at the top of `adapters.rb` and `adapters.yml`. |
 | Add a gate | Write the check in `Gates`, returning a `Gates::Result`, and call it from `Verifier#verify` in cost order: cheap static checks before running commands. Add its config key to `Project::DEFAULTS["gates"]`, and add a unit test plus, if it involves the agent, a night scenario. |
 | Add a config setting | Add it to `Project::DEFAULTS` with a comment, document it in `templates/project.yml`, and read it from `cfg`. |
 | Change what the worker is told | Edit `templates/prompts/worker.md`, plus `Briefing` if you need a new `{{PLACEHOLDER}}`. A project can override any prompt in `<state>/prompts/`. |
-| Add a command | Put the work in a service (a new file in `lib/nightshift/`, required from `lib/nightshift.rb`) that prints through `UI` and raises `Error`. In `CLI`, add `desc "name STATE_DIR", "..."`, a `method_option` for each option (with `type:`, `default:` and `desc:`), and a method of the same name that checks the option values and calls the service. Add a test to `test/cli_test.rb` and an example to README section 2. |
+| Add a command | Put the work in a service (a new file in `lib/nightshift/`, required from `lib/nightshift.rb`) that prints through `UI` and raises `Error`. In `CLI`, add `desc "name STATE_DIR", "..."`, a `method_option` for each option (with `type:`, `default:` and `desc:`), and a method of the same name that checks the option values and calls the service. Add a test to `test/cli_test.rb`, an example to README section 2, and the file to `lib/ARCHITECTURE.md`. |
 | Change the task format | Update `Plan` (accessors and `problems`), the planner prompt, and the task format in README section 7. |
 
 Whatever you change, update the affected `.md` files in the same change (see `AGENTS.md`).

@@ -4,15 +4,20 @@
 //                 protected-path blocks, plus path repair.
 //   PI_PATHFIX=1  path repair only, for interactive use: pi -e <this file>
 //
-// Path repair: small local models garble paths ("k Kerala-astro-x/src/lib/a.ts", a stray project-folder
+// Path repair: small local models garble paths ("k My-app-x/src/lib/a.ts", a stray project-folder
 // prefix, wrong case, an absolute path into a different checkout). For read/edit/write the guard rewrites
 // the path argument (event.input is mutable) to the file that really exists under the root: longest
 // existing suffix, case-insensitive per segment, then a unique basename. A note is appended to the tool
 // result so the model learns the correct path. Unfixable misses get suggestions; after
 // PI_GUARD_MAX_PATH_MISSES misses the session ends early instead of burning the time budget.
 // Repairs and misses are logged to PI_GUARD_LOG; nightshift feeds them into the next attempt's prompt.
+//
+// Pane mode (`ns run --tmux` runs pi's own interactive screen in a tmux pane):
+//   PI_GUARD_FINAL=<file>      the last assistant message is written there after every run (the
+//                              harness reads the DONE/STUCK line from it; print mode has stdout)
+//   PI_GUARD_EXIT_ON_SETTLE=1  quit pi once the agent has settled, as `pi -p` would
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"; // type-only; erased at load
-import { appendFileSync, readdirSync, statSync } from "node:fs";
+import { appendFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 const env = process.env;
@@ -28,6 +33,8 @@ const MAX_PATH_MISSES = num(env.PI_GUARD_MAX_PATH_MISSES, 8); // unfixable wrong
 const ALLOW_INSTALL = env.PI_GUARD_ALLOW_INSTALL === "1";
 const ROOT = resolve(env.PI_GUARD_ROOT ?? process.cwd());
 const LOG = env.PI_GUARD_LOG;
+const FINAL = env.PI_GUARD_FINAL;
+const EXIT_ON_SETTLE = env.PI_GUARD_EXIT_ON_SETTLE === "1";
 const PROTECT = (env.PI_GUARD_PROTECT ?? "").split(",").map((s) => s.trim().replace(/\\/g, "/")).filter(Boolean);
 
 const DANGEROUS: Array<[RegExp, string]> = [
@@ -150,9 +157,23 @@ function topLevel(): string {
   try { return readdirSync(ROOT).filter((x) => !SKIP_DIRS.has(x)).slice(0, 25).join(", "); } catch { return ""; }
 }
 
+/** The text of the last assistant message in an agent_end message list, or undefined if there is none. */
+export function lastAssistantText(messages: unknown): string | undefined {
+  if (!Array.isArray(messages)) return undefined;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m: any = messages[i];
+    if (m?.role !== "assistant") continue;
+    if (typeof m.content === "string") return m.content;
+    if (Array.isArray(m.content)) {
+      return m.content.filter((c: any) => c?.type === "text" && typeof c.text === "string").map((c: any) => c.text).join("\n");
+    }
+  }
+  return undefined;
+}
+
 // ------------------------------------------------------------------ extension
 export default function (pi: ExtensionAPI) {
-  if (!ACTIVE && !REPAIR) return;
+  if (!ACTIVE && !REPAIR && !FINAL && !EXIT_ON_SETTLE) return;
   let turns = 0;
   let startedAt = Date.now();
   let stopped: string | undefined;
@@ -173,6 +194,19 @@ export default function (pi: ExtensionAPI) {
   const keyOf = (event: any) => String(event.toolCallId ?? event.toolName);
 
   pi.on("agent_start", async () => { startedAt = Date.now(); log({ kind: "start", root: ROOT, maxTurns: MAX_TURNS, active: ACTIVE, repair: REPAIR }); });
+
+  // Pane mode: keep the final answer where the harness can read it, and quit like `pi -p` does.
+  pi.on("agent_end", async (event: any) => {
+    if (!FINAL) return;
+    const text = lastAssistantText(event.messages);
+    if (text === undefined) return;
+    try { writeFileSync(FINAL, text + "\n"); } catch { /* never break the run */ }
+  });
+  pi.on("agent_settled", async (event: any, ctx) => {
+    if (!EXIT_ON_SETTLE) return;
+    log({ kind: "exit_on_settle", aborted: Boolean(event?.aborted) });
+    ctx.shutdown();
+  });
 
   pi.on("turn_start", async (_event, ctx) => {
     turns += 1;

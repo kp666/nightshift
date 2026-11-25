@@ -13,10 +13,14 @@ tasks, agree on the stack with the human, then build the **skeleton** yourself:
    will fill in. Folders that don't exist are a common source of path mistakes for the worker.
 4. `AGENTS.md`: the stack, the layout, the exact commands to run the tests and the type checker,
    and the coding conventions. It is the worker's only map of the project.
-5. Tell the human the exact lines to add to `{{CONFIG}}`:
+5. Last, once the skeleton exists and its tests pass, tell the human the exact lines to add to
+   `{{CONFIG}}`. Give only commands you have run from the repo root and seen pass; a global
+   gate that fails on the skeleton fails every attempt of the night:
    - `project.bootstrap`: how to reinstall dependencies (for example `npm ci`);
    - `gates.global`: the full test suite (and a type check or linter, if there is one), so every
-     task has to keep the whole project green.
+     task has to keep the whole project green;
+   - `gates.protect`: the skeleton files the worker must not edit (manifest, lockfile, test
+     fixtures, shared test helpers).
 
 Keep the skeleton free of feature code. Then plan the features on top of it. The first tasks
 should lay the foundations (core types, the data model, pure helper functions), with later tasks

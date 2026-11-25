@@ -4,10 +4,15 @@
 # gates decide.
 #
 # Placeholders: {repo} {run_dir} {prompt_file} {prompt} {message} {home} {ruby} {state}
-#               {container} {protect_csv} {guard_minutes} {max_turns}
+#               {container} {protect_csv} {guard_minutes} {max_turns} {out}
+#
+# pane_cmd/pane_env: how to run the agent on screen in a tmux pane for `ns run --tmux` (pi's own
+# interactive screen; the guard makes it quit when the agent settles and write its last answer
+# to {out}). Adapters without pane_cmd run headless in tmux mode too.
 #
 # Verified (2026-11): pi 1.5.2, claude 2.1.x and opencode 1.18 flags (from --help).
 # Not verified end to end: real runs with the local model, codex.
+# pane_cmd verified (2026-11) for pi-local with pi 1.5.2 in psmux 3.4.
 
 # Shared environment for pi runs that load the unattended guard extension.
 x-pi-guard-env: &pi_guard_env
@@ -17,6 +22,11 @@ x-pi-guard-env: &pi_guard_env
   PI_GUARD_PROTECT: "{protect_csv}"
   PI_GUARD_MAX_MINUTES: "{guard_minutes}"
   PI_GUARD_MAX_TURNS: "{max_turns}"
+
+# Extra environment for pi's interactive screen in a tmux pane (pane_cmd).
+x-pi-pane-env: &pi_pane_env
+  PI_GUARD_FINAL: "{out}"
+  PI_GUARD_EXIT_ON_SETTLE: "1"
 
 adapters:
   # ------------------------------------------------------------ local Qwen via pi (default worker)
@@ -28,6 +38,13 @@ adapters:
           --no-skills, --no-prompt-templates, --no-mcp, --no-approve,
           "@{prompt_file}", "{message}"]
     prompt_via: file
+    pane_cmd: [pi, --offline, --session-dir, "{run_dir}/session",
+               --model, llama-cpp/qwen3.8-pi, --thinking, "off",
+               --tools, "read,bash,edit,write",
+               --no-extensions, -e, "{home}/adapters/pi/unattended-guard.ts",
+               --no-skills, --no-prompt-templates, --no-mcp, --no-approve,
+               "@{prompt_file}", "{message}"]
+    pane_env: *pi_pane_env
     interactive_cmd: [pi, --model, llama-cpp/qwen3.8-pi, "@{prompt_file}"]
     requires_server: true
     network: local
@@ -68,6 +85,12 @@ adapters:
           --no-skills, --no-prompt-templates, --no-mcp, --no-approve,
           "@{prompt_file}", "{message}"]
     prompt_via: file
+    pane_cmd: [pi, --session-dir, "{run_dir}/session", --model, openrouter/moonshotai/kimi-k2.6,
+               --tools, "read,bash,edit,write",
+               --no-extensions, -e, "{home}/adapters/pi/unattended-guard.ts",
+               --no-skills, --no-prompt-templates, --no-mcp, --no-approve,
+               "@{prompt_file}", "{message}"]
+    pane_env: *pi_pane_env
     interactive_cmd: [pi, --model, openrouter/moonshotai/kimi-k2.6, "@{prompt_file}"]
     network: internet
     timeout_min: 45

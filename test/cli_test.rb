@@ -61,6 +61,13 @@ class CLITest < Minitest::Test
     assert_includes err_hours, "--hours must be greater than 0"
   end
 
+  def test_init_writes_a_clone_config_by_default
+    init_project
+    project = YAML.safe_load_file(File.join(@state, "nightshift.yml"))["project"]
+
+    assert_equal ["repo", false], project.values_at("repo", "in_place")
+  end
+
   def test_init_refuses_an_existing_state_dir
     first, = init_project
     again, _, err = init_project
@@ -78,6 +85,17 @@ class CLITest < Minitest::Test
     assert_equal 0, rc
     assert_includes text, "fetch \"#{Nightshift::Util.norm(File.join(@state, 'repo'))}\" #{branch}:#{branch}"
     assert_includes text, "merge --no-ff #{branch}"
+  end
+
+  def test_doctor_reports_a_server_start_cmd_that_is_not_on_path
+    init_project
+    config = File.join(@state, "nightshift.yml")
+    text = File.read(config).sub(/^  # start_cmd: .*$/, "  start_cmd: [ns-no-such-starter, --port, \"8080\"]")
+    File.write(config, text.sub(/^  health_url: .*$/, '  health_url: ""'), mode: "wb")
+    rc, out, = ns("doctor", @state)
+
+    assert_equal 1, rc
+    assert_includes out, "server start_cmd ns-no-such-starter (not found on PATH)"
   end
 
   def test_stop_writes_the_stop_file

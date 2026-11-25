@@ -94,14 +94,18 @@ module Nightshift
                           desc: "honour the time limit in nightshift.yml (--no-limit: run until the work is done)"
     method_option :max_iterations, type: :numeric, banner: "N", desc: "cap the number of attempts"
     method_option :fresh, type: :boolean, desc: "start a new night even if one is still active"
+    method_option :tmux, type: :boolean,
+                         desc: "run in a tmux session and show each attempt's agent live in a pane (see README)"
     def run_night(state)
       until_time = clock(:until)
       hours = options[:limit] ? positive(:hours) : 0
+      max_iterations = positive(:max_iterations)&.to_i
       prj = project(state)
+      return Pane.open_night(Pane.session_name(prj.name), tmux_args(prj), cwd: prj.dir) if tmux_launch?
+
       prj.cfg["budgets"].merge!("hours" => hours, "until" => "") if hours
       FileUtils.rm_f(prj.stop_file)
-      code = Night.new(prj, until_time: until_time, max_iterations: positive(:max_iterations)&.to_i,
-                            fresh: options[:fresh]).run
+      code = night(prj, until_time: until_time, max_iterations: max_iterations)
       exit code unless code.zero?
     end
 
@@ -129,6 +133,26 @@ module Nightshift
 
     no_commands do
       def project(state) = Project.new(state)
+
+      # The night loop; with --tmux (inside the tmux session) each attempt's agent runs in a pane.
+      def night(prj, **)
+        return Night.new(prj, fresh: options[:fresh], **).run unless options[:tmux]
+
+        Pane.host_night { |pane| Night.new(prj, fresh: options[:fresh], pane: pane, **).run }
+      end
+
+      # --tmux from a plain terminal: the night must first be started in a tmux session.
+      def tmux_launch? = options[:tmux] && !Pane.inside?
+
+      # The same `ns run` command line, to run again inside a new tmux session.
+      def tmux_args(prj)
+        flags = { "--until" => options[:until], "--hours" => options[:hours],
+                  "--max-iterations" => options[:max_iterations] }
+        args = ["run", prj.dir, "--tmux", *flags.compact.flat_map { |flag, value| [flag, value.to_s] }]
+        args << "--no-limit" unless options[:limit]
+        args << "--fresh" if options[:fresh]
+        args
+      end
 
       # The option as HH:MM, or nil when it was not given.
       def clock(name)

@@ -16,7 +16,15 @@ the contract: the quality of the night depends almost entirely on it.
 {{NEW_PROJECT}}## What to produce
 
 Explore the repo first (read the code and run the existing tests, if there are any). Ask the human about anything ambiguous
-before writing files. Then write:
+before writing files.
+
+The scope is the human's decision, not yours. If the requirements are thin (a goal with no
+concrete Must-haves), or something has to be left out to fit, propose the scope first: what is
+in, what is out, and roughly how many tasks. Write it into requirements.md only after the
+human agrees. Don't add rules the harness already enforces (no new packages, no network, no
+edits to protected paths).
+
+Then write:
 
 1. **Visible acceptance tests** under `{{ACCEPT_DIR}}` in the repo's own test framework (make sure the test runner's include pattern picks them up). These
    define "done". They must FAIL now and pass only when the feature really works.
@@ -44,6 +52,14 @@ before writing files. Then write:
 
 - One task = about 8 agent turns: 1-2 files, one function or one behaviour. Split anything bigger.
 - Each task has its own crisp check command that runs in under 2 minutes, through `{{SHELL}}`.
+- Run every check and gate command yourself, from the repo root, exactly as you write it. Quote
+  globs: a runner may not expand them the way you expect (Node 22's `node --test tests/unit/`
+  fails; `node --test "tests/unit/*.test.js"` works).
+- A check fails only because of its own task. A later task's missing function must not break an
+  earlier task's check (in ES modules, `import * as m` instead of named imports, which fail at
+  link time for every test in the file).
+- Data the worker reads (fixtures, golden values) must be greppable: one record per line, not
+  pretty-printed. A 200 KB pretty-printed JSON file fills the worker's context.
 - Order tasks with `dependsOn`; earlier tasks must not need later ones.
 - The description must be self-contained: the worker sees ONLY its own task, AGENTS.md and the code.
 - Prefer pure functions with exact expected values (golden tests from a reference implementation).
